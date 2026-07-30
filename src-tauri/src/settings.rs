@@ -26,6 +26,10 @@ pub struct Settings {
     pub play_sound_on_capture: bool,
     pub copy_url_after_upload: bool,
 
+    // Hotkeys
+    pub hotkey_full: String,
+    pub hotkey_area: String,
+
     // Upload
     pub server_url: String,
     pub auto_copy: bool,
@@ -41,6 +45,8 @@ impl Default for Settings {
             start_with_windows: false,
             play_sound_on_capture: false,
             copy_url_after_upload: false,
+            hotkey_full: "Ctrl+Shift+1".into(),
+            hotkey_area: "Ctrl+Shift+2".into(),
             server_url: "https://sinister.ovh/api/upload".into(),
             auto_copy: true,
         }
@@ -74,6 +80,22 @@ fn settings_path(app: &AppHandle) -> Result<PathBuf, String> {
         .map_err(|e| format!("app_data_dir failed: {e}"))?;
     std::fs::create_dir_all(&dir).map_err(|e| format!("create_dir_all failed: {e}"))?;
     Ok(dir.join("settings.json"))
+}
+
+// ---------------------------------------------------------------------------
+// Sync helpers (for use during setup before async runtime is ready)
+// ---------------------------------------------------------------------------
+
+pub fn load_settings_sync(app: &AppHandle) -> Settings {
+    match settings_path(app) {
+        Ok(path) if path.exists() => {
+            match std::fs::read_to_string(&path) {
+                Ok(raw) => serde_json::from_str(&raw).unwrap_or_default(),
+                Err(_) => Settings::default(),
+            }
+        }
+        _ => Settings::default(),
+    }
 }
 
 // ---------------------------------------------------------------------------

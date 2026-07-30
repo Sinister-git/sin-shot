@@ -14,6 +14,8 @@
     start_with_windows: boolean;
     play_sound_on_capture: boolean;
     copy_url_after_upload: boolean;
+    hotkey_full: string;
+    hotkey_area: string;
     server_url: string;
     auto_copy: boolean;
   }
@@ -32,7 +34,6 @@
   // ---------------------------------------------------------------------------
 
   let activeTab: Tab = $state('general');
-  let saved = $state(false);
   let settings: Settings = $state({
     save_folder: '',
     filename_pattern: 'screenshot_{date}_{time}',
@@ -41,6 +42,8 @@
     start_with_windows: false,
     play_sound_on_capture: false,
     copy_url_after_upload: false,
+    hotkey_full: 'Ctrl+Shift+1',
+    hotkey_area: 'Ctrl+Shift+2',
     server_url: 'https://sinister.ovh/api/upload',
     auto_copy: true,
   });
@@ -97,9 +100,7 @@
   async function handleSave() {
     try {
       await invoke('save_settings', { settings });
-      saved = true;
       showToast('Settings saved');
-      setTimeout(() => (saved = false), 2500);
     } catch (e) {
       console.error('Failed to save settings:', e);
       showToast('Error saving settings');
@@ -167,6 +168,15 @@
         await invoke('unregister_hotkey', { keyCombo: oldCombo });
       }
       await invoke('register_hotkey', { keyCombo: entry.combo });
+
+      // Persist combo to settings
+      if (entry.id === 'capture_full') {
+        settings.hotkey_full = entry.combo;
+      } else if (entry.id === 'capture_area') {
+        settings.hotkey_area = entry.combo;
+      }
+      await invoke('save_settings', { settings });
+
       showToast(`Hotkey "${entry.label}" updated to ${entry.combo}`);
     } catch (e) {
       console.error('Failed to update hotkey:', e);

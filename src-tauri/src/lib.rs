@@ -26,25 +26,23 @@ pub fn run() {
             // Initialise the platform hotkey thread (Windows) / no-op (Linux).
             hotkeys::init_hotkey_system();
 
-            // Register default global shortcuts.
-            // Ctrl+Shift+1 → full-monitor capture
-            // Ctrl+Shift+2 → area-select capture
+            // Load persisted settings, falling back to defaults
             let handle = app.handle().clone();
             hotkeys::store_app_handle(handle.clone());
+            let persisted = settings::load_settings_sync(&handle);
 
-            // We cannot call async Tauri commands from setup directly, so we
-            // invoke the platform register helpers directly with the AppHandle.
-            let r1 = hotkeys::register_hotkey_platform("Ctrl+Shift+1", handle.clone());
-            let r2 = hotkeys::register_hotkey_platform("Ctrl+Shift+2", handle);
+            // Register global shortcuts from persisted settings
+            let r1 = hotkeys::register_hotkey_platform(&persisted.hotkey_full, handle.clone());
+            let r2 = hotkeys::register_hotkey_platform(&persisted.hotkey_area, handle);
 
-            // Sync HotkeyState so the frontend can discover defaults
+            // Sync HotkeyState so the frontend can discover registered hotkeys
             let state = app.state::<std::sync::Mutex<HotkeyState>>();
             if let Ok(mut guard) = state.lock() {
                 if r1.is_ok() {
-                    guard.hotkeys_registered.push("Ctrl+Shift+1".to_string());
+                    guard.hotkeys_registered.push(persisted.hotkey_full);
                 }
                 if r2.is_ok() {
-                    guard.hotkeys_registered.push("Ctrl+Shift+2".to_string());
+                    guard.hotkeys_registered.push(persisted.hotkey_area);
                 }
             }
 
