@@ -19,6 +19,9 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 - **Frontend test**: `npm test` (vitest), `npm run check` (svelte-check)
 - **Window config**: frameless, transparent, always-on-top overlay for capture mode
 - **Annotation editor components**: `AnnotationCanvas.svelte` (HTML5 Canvas, tools: pen/arrow/rect/text/blur/eraser, 50-op undo/redo), `Toolbar.svelte` (vertical, right side), `ActionBar.svelte` (copy/save/upload/cancel)
+- **App flow states** (managed in `Overlay.svelte`) : `idle` → `capturing` (hotkey) → `annotating` (capture done) → `uploading` (upload in flight) → back to `idle`. The main window stays visible during annotation; `cancel_capture` hides it on finish.
+- **Annotation image export**: `AnnotationCanvas.getAnnotatedImage()` composites the base image + annotations into a single PNG (returns raw base64, no data-URL prefix). Call this before invoking clipboard/save/upload commands.
+- **Backend image parameter convention**: all three commands (`copy_to_clipboard`, `save_to_file`, `upload_screenshot`) accept `image_data_base64: String` — a base64-encoded PNG without the `data:image/png;base64,` prefix. Each decodes it internally via `base64::Engine`.
 - **Svelte 5 runes**: `$state`, `$props`, `$bindable()`, `$effect` — no legacy stores
 - **No-mistakes gate**: push via `git push no-mistakes <branch>`
 

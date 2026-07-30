@@ -26,11 +26,19 @@ impl UploadState {
 #[tauri::command]
 pub async fn upload_screenshot(
     state: State<'_, Mutex<UploadState>>,
-    _image_data: Vec<u8>,
+    image_data_base64: String,
     _filename: String,
 ) -> Result<String, String> {
     let mut guard = state.lock().map_err(|e| e.to_string())?;
+    let _bytes = base64_decode(&image_data_base64)?;
     // TODO: POST multipart to sinister.ovh
     guard.last_upload_url = Some("https://sinister.ovh/stub.png".into());
     Ok(guard.last_upload_url.clone().unwrap())
+}
+
+fn base64_decode(input: &str) -> Result<Vec<u8>, String> {
+    use base64::Engine as _;
+    base64::engine::general_purpose::STANDARD
+        .decode(input)
+        .map_err(|e| format!("Base64 decode failed: {e}"))
 }

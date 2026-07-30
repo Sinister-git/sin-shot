@@ -1,6 +1,10 @@
 <script lang="ts">
   import { invoke } from '@tauri-apps/api/core';
   import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+  import AnnotationCanvas from './AnnotationCanvas.svelte';
+  import Toolbar from './Toolbar.svelte';
+  import ActionBar from './ActionBar.svelte';
+  import type { Tool } from '$lib/types';
 
   // ---------------------------------------------------------------------------
   // Types
@@ -30,7 +34,34 @@
   type CaptureMode = 'full-monitor' | 'area-select' | null;
 
   // ---------------------------------------------------------------------------
-  // State
+  // Flow state
+  // ---------------------------------------------------------------------------
+
+  type FlowState = 'idle' | 'capturing' | 'annotating' | 'uploading';
+  let flowState: FlowState = $state('idle');
+
+  // Captured image from the backend
+  interface CapturedImage {
+    data: string;   // base64-encoded RGBA pixels
+    width: number;
+    height: number;
+  }
+  let capturedImage: CapturedImage | null = $state(null);
+
+  // Annotation state
+  let currentTool: Tool = $state('pen');
+  let currentColor: string = $state('#ff0000');
+  let uploading = $state(false);
+  let uploadUrl: string | null = $state(null);
+
+  // Ref to AnnotationCanvas for export
+  let annotationCanvas: AnnotationCanvas | null = $state(null);
+
+  // Upload response (shown to user after upload completes)
+  let lastUploadResult: string | null = $state(null);
+
+  // ---------------------------------------------------------------------------
+  // Capture state
   // ---------------------------------------------------------------------------
 
   let mode: CaptureMode = $state(null);
@@ -40,7 +71,7 @@
   let dpr = $state(typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1);
 
   // Full-monitor mode
-  let cursorMonitor: number = $state(-1); // index into monitors[]
+  let cursorMonitor: number = $state(-1);
 
   // Area-select mode
   let selecting = $state(false);
@@ -77,7 +108,6 @@
   let unlisteners: UnlistenFn[] = [];
 
   async function setupListeners() {
-    // Listen for hotkey-pressed events from the Rust hotkey thread.
     const u1 = await listen<{ combo: string }>('hotkey-pressed', (event) => {
       const combo = event.payload.combo;
       if (combo === 'Ctrl+Shift+1') {
@@ -87,14 +117,14 @@
       }
     });
 
-    // Listen for capture-mode-started (emitted by start_capture after window resize).
     const u2 = await listen<{ mode: string }>('capture-mode-started', (event) => {
       mode = event.payload.mode as CaptureMode;
+      flowState = 'capturing';
     });
 
-    // Listen for cancellation.
     const u3 = await listen('capture-mode-cancelled', () => {
       mode = null;
+      flowState = 'idle';
     });
 
     unlisteners = [u1, u2, u3];
@@ -122,20 +152,27 @@
   });
 
   $effect(() => {
-    if (mode !== null) {
+    if (flowState !== 'idle') {
       document.body.classList.add('capture-active');
     } else {
       document.body.classList.remove('capture-active');
     }
   });
 
+  // ---------------------------------------------------------------------------
   // Global keyboard handler
+  // ---------------------------------------------------------------------------
+
   function onKeydown(e: KeyboardEvent) {
-    if (mode === null) return;
+    if (flowState === 'idle') return;
 
     if (e.key === 'Escape') {
       e.preventDefault();
-      cancelCapture();
+      if (flowState === 'annotating' || flowState === 'uploading') {
+        handleCancel();
+      } else if (flowState === 'capturing') {
+        cancelCapture();
+      }
     } else if (e.key === 'Enter' && mode === 'area-select' && selectionRect) {
       e.preventDefault();
       confirmAreaCapture();
@@ -147,18 +184,15 @@
   // ---------------------------------------------------------------------------
 
   async function enterCaptureMode(m: 'full-monitor' | 'area-select') {
-    if (mode !== null || entering) return;
+    if (flowState !== 'idle' || entering) return;
     entering = true;
     try {
-      // Fetch monitor information before resizing the window.
       try {
         monitors = await invoke<Monitor[]>('get_monitors');
       } catch {
         monitors = [];
       }
 
-      // Compute the window offset (top-left of bounding box) and convert
-      // all monitor coordinates from physical pixels to CSS pixels.
       if (monitors.length > 0) {
         let minX = Infinity;
         let minY = Infinity;
@@ -178,7 +212,6 @@
         }));
       }
 
-      // Tell Rust to resize and show the overlay window.
       try {
         await invoke('start_capture', { mode: m });
       } catch (err) {
@@ -192,6 +225,7 @@
   async function cancelCapture() {
     if (entering) return;
     mode = null;
+    flowState = 'idle';
     entering = true;
     try {
       await invoke('cancel_capture');
@@ -204,12 +238,19 @@
   function resetState() {
     entering = false;
     mode = null;
+    flowState = 'idle';
     monitors = [];
     cursorMonitor = -1;
     selecting = false;
     selStart = { x: 0, y: 0 };
     selCurrent = { x: 0, y: 0 };
     selConfirmed = null;
+    capturedImage = null;
+    uploading = false;
+    uploadUrl = null;
+    lastUploadResult = null;
+    currentTool = 'pen';
+    currentColor = '#ff0000';
   }
 
   // ---------------------------------------------------------------------------
@@ -217,9 +258,6 @@
   // ---------------------------------------------------------------------------
 
   function onFullMouseMove(e: MouseEvent) {
-    // Determine which monitor the cursor is on.
-    // Mouse event coordinates are relative to the window. Convert to screen
-    // coordinates by adding the window offset.
     const sx = e.clientX + windowOffset.x;
     const sy = e.clientY + windowOffset.y;
 
@@ -235,7 +273,7 @@
   }
 
   // ---------------------------------------------------------------------------
-  // Full-monitor mode — click to capture
+  // Full-monitor mode — click to capture → annotate
   // ---------------------------------------------------------------------------
 
   async function onFullClick(_e?: MouseEvent | KeyboardEvent) {
@@ -245,13 +283,12 @@
 
   async function doFullCapture(monitorName: string) {
     try {
-      const result = await invoke('capture_full_screen', { monitorName });
-      console.log('captured full monitor', monitorName, result);
-      // TODO: post-capture flow (show ActionBar, annotation, etc.)
+      const result = await invoke<CapturedImage>('capture_full_screen', { monitorName });
+      transitionToAnnotation(result);
     } catch (err) {
       console.error('capture_full_screen failed:', err);
+      await cancelCapture();
     }
-    await cancelCapture();
   }
 
   // ---------------------------------------------------------------------------
@@ -259,7 +296,7 @@
   // ---------------------------------------------------------------------------
 
   function onAreaMouseDown(e: MouseEvent) {
-    if (e.button !== 0) return; // left button only
+    if (e.button !== 0) return;
     selecting = true;
     selStart = { x: e.clientX, y: e.clientY };
     selCurrent = { x: e.clientX, y: e.clientY };
@@ -276,8 +313,6 @@
     if (!selecting) return;
     selecting = false;
 
-    // Persist the selection so it stays visible while the user chooses
-    // to confirm (Enter) or cancel (Escape).
     const w = Math.abs(selCurrent.x - selStart.x);
     const h = Math.abs(selCurrent.y - selStart.y);
     if (w < 2 || h < 2) {
@@ -293,14 +328,12 @@
   }
 
   // ---------------------------------------------------------------------------
-  // Area-select — confirm capture
+  // Area-select — confirm capture → annotate
   // ---------------------------------------------------------------------------
 
   async function confirmAreaCapture() {
     if (!selectionRect) return;
 
-    // Selection rect coordinates are window-relative CSS pixels.
-    // Convert to absolute physical desktop coordinates for the backend.
     const d = window.devicePixelRatio || 1;
     const x = (selectionRect.left + windowOffset.x) * d;
     const y = (selectionRect.top + windowOffset.y) * d;
@@ -313,17 +346,106 @@
     }
 
     try {
-      const result = await invoke('capture_area', {
+      const result = await invoke<CapturedImage>('capture_area', {
         x: Math.round(x),
         y: Math.round(y),
         width: Math.round(width),
         height: Math.round(height),
       });
-      console.log('captured area', result);
-      // TODO: post-capture flow
+      transitionToAnnotation(result);
     } catch (err) {
       console.error('capture_area failed:', err);
+      await cancelCapture();
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Post-capture → annotation transition
+  // ---------------------------------------------------------------------------
+
+  function transitionToAnnotation(image: CapturedImage) {
+    mode = null;          // clear capture mode — we're past capture
+    flowState = 'annotating';
+    capturedImage = image;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Annotation action handlers
+  // ---------------------------------------------------------------------------
+
+  function exportAnnotatedImage(): string | null {
+    return annotationCanvas?.getAnnotatedImage() ?? null;
+  }
+
+  async function handleCopy() {
+    const pngBase64 = exportAnnotatedImage();
+    if (!pngBase64) return;
+    try {
+      await invoke('copy_to_clipboard', { imageDataBase64: pngBase64 });
+    } catch (err) {
+      console.error('copy_to_clipboard failed:', err);
+    }
+    await finishAnnotation();
+  }
+
+  async function handleSave() {
+    const pngBase64 = exportAnnotatedImage();
+    if (!pngBase64) return;
+    try {
+      const savedPath = await invoke<string>('save_to_file', { imageDataBase64: pngBase64 });
+      console.log('saved to', savedPath);
+    } catch (err) {
+      console.error('save_to_file failed:', err);
+    }
+    await finishAnnotation();
+  }
+
+  async function handleUpload() {
+    const pngBase64 = exportAnnotatedImage();
+    if (!pngBase64) return;
+
+    uploading = true;
+    flowState = 'uploading';
+    uploadUrl = null;
+
+    try {
+      const url = await invoke<string>('upload_screenshot', {
+        imageDataBase64: pngBase64,
+        filename: `sin-shot-${Date.now()}.png`,
+      });
+      uploadUrl = url;
+
+      // Copy the URL to clipboard
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          await navigator.clipboard.writeText(url);
+        }
+      } catch {
+        // best-effort URL copy
+      }
+
+      // Show result briefly then finish
+      lastUploadResult = url;
+      // Keep visible for 2 seconds so the user sees the URL, then finish
+      await new Promise(resolve => setTimeout(resolve, 2000));
+    } catch (err) {
+      console.error('upload failed:', err);
+    }
+
+    uploading = false;
+    await finishAnnotation();
+  }
+
+  async function handleCancel() {
+    await finishAnnotation();
+  }
+
+  async function finishAnnotation() {
+    capturedImage = null;
+    uploading = false;
+    uploadUrl = null;
+    lastUploadResult = null;
+    mode = null;
     await cancelCapture();
   }
 
@@ -331,7 +453,6 @@
   // Helpers
   // ---------------------------------------------------------------------------
 
-  /** Format a pixel dimension, e.g. "1920 × 1080". */
   function fmtRes(w: number, h: number): string {
     return `${w} × ${h}`;
   }
@@ -343,7 +464,7 @@
 <!-- Full Monitor Mode                                                          -->
 <!-- ========================================================================= -->
 
-{#if mode === 'full-monitor'}
+{#if flowState === 'capturing' && mode === 'full-monitor'}
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div
     class="overlay-full"
@@ -354,10 +475,8 @@
     onclick={onFullClick}
     onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') onFullClick(e); }}
   >
-    <!-- Dim overlay -->
     <div class="dim"></div>
 
-    <!-- Monitor highlight -->
     {#if activeMonitor}
       {@const mx = activeMonitor.x - windowOffset.x}
       {@const my = activeMonitor.y - windowOffset.y}
@@ -377,7 +496,6 @@
       </div>
     {/if}
 
-    <!-- No monitor hint (cursor outside known monitors) -->
     {#if !activeMonitor}
       <div class="no-monitor-hint">Move cursor to a monitor to capture</div>
     {/if}
@@ -388,7 +506,7 @@
 <!-- Area Select Mode                                                          -->
 <!-- ========================================================================= -->
 
-{#if mode === 'area-select'}
+{#if flowState === 'capturing' && mode === 'area-select'}
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
   <div
@@ -399,10 +517,8 @@
     onmousemove={onAreaMouseMove}
     onmouseup={onAreaMouseUp}
   >
-    <!-- Dim overlay -->
     <div class="dim"></div>
 
-    <!-- Pre-selection: show cursor label -->
     {#if !selecting && !selectionRect}
       <div
         class="cursor-label"
@@ -413,7 +529,6 @@
       </div>
     {/if}
 
-    <!-- Selection rectangle with cutout -->
     {#if selectionRect}
       <div
         class="selection-box"
@@ -429,6 +544,51 @@
         </div>
       </div>
     {/if}
+  </div>
+{/if}
+
+<!-- ========================================================================= -->
+<!-- Annotation Mode — captured image + tools                                  -->
+<!-- ========================================================================= -->
+
+{#if (flowState === 'annotating' || flowState === 'uploading') && capturedImage}
+  <div class="annotation-overlay">
+    <!-- Dark backdrop -->
+    <div class="annotation-backdrop"></div>
+
+    <div class="annotation-layout">
+      <div class="annotation-image-container">
+        {#if capturedImage}
+          <AnnotationCanvas
+            bind:this={annotationCanvas}
+            imageData={capturedImage.data}
+            imageWidth={capturedImage.width}
+            imageHeight={capturedImage.height}
+            tool={currentTool}
+            color={currentColor}
+          />
+        {/if}
+      </div>
+
+      <Toolbar bind:activeTool={currentTool} bind:color={currentColor} />
+
+      <ActionBar
+        onCopy={handleCopy}
+        onSave={handleSave}
+        onUpload={handleUpload}
+        onCancel={handleCancel}
+        uploading={uploading}
+      />
+
+      <!-- Upload result notification -->
+      {#if uploadUrl}
+        <div class="upload-result">
+          <span class="upload-result-icon">☁️</span>
+          <span class="upload-result-text">Uploaded!</span>
+          <span class="upload-result-url">{uploadUrl}</span>
+        </div>
+      {/if}
+    </div>
   </div>
 {/if}
 
@@ -524,7 +684,6 @@
     -webkit-user-select: none;
   }
 
-  /* Cursor label before dragging */
   .cursor-label {
     position: fixed;
     display: flex;
@@ -553,7 +712,6 @@
     backdrop-filter: blur(4px);
   }
 
-  /* Selection rectangle — cutout effect via box-shadow */
   .selection-box {
     position: fixed;
     border: 2px dashed #a78bfa;
@@ -564,7 +722,6 @@
     z-index: 1001;
   }
 
-  /* Pixel size readout at bottom-right of selection */
   .selection-readout {
     position: absolute;
     bottom: -32px;
@@ -578,6 +735,86 @@
     padding: 4px 10px;
     white-space: nowrap;
     backdrop-filter: blur(8px);
+  }
+
+  /* ---------------------------------------------------------------------------
+   * Annotation Mode
+   * ------------------------------------------------------------------------- */
+
+  .annotation-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  .annotation-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.85);
+    pointer-events: none;
+  }
+
+  .annotation-layout {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    max-width: 95vw;
+    max-height: 92vh;
+    z-index: 1;
+  }
+
+  .annotation-image-container {
+    position: relative;
+    pointer-events: all;
+    /* Constrain to viewport with padding for toolbar and action bar */
+    max-width: calc(95vw - 120px);
+    max-height: calc(92vh - 80px);
+    overflow: hidden;
+    border-radius: 4px;
+    box-shadow: 0 0 40px rgba(0, 0, 0, 0.6);
+  }
+
+  .upload-result {
+    position: absolute;
+    top: -52px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: rgba(40, 42, 54, 0.95);
+    border: 1px solid #50c878;
+    border-radius: 8px;
+    padding: 8px 16px;
+    white-space: nowrap;
+    backdrop-filter: blur(8px);
+    z-index: 20;
+  }
+
+  .upload-result-icon {
+    font-size: 18px;
+  }
+
+  .upload-result-text {
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    color: #50c878;
+  }
+
+  .upload-result-url {
+    font-family: 'Cascadia Code', 'Fira Code', monospace;
+    font-size: 11px;
+    color: #a78bfa;
+    max-width: 300px;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   /* ---------------------------------------------------------------------------
