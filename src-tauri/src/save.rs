@@ -37,7 +37,7 @@ pub async fn save_to_file(
     let timestamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
-        .as_secs();
+        .as_millis();
     let filename = format!("sin-shot-{}.png", timestamp);
     let path = save_dir.join(&filename);
 

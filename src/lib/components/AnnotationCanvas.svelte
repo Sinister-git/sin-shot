@@ -121,7 +121,8 @@
     if (!mctx) return null;
     mctx.drawImage(baseImage, 0, 0);
     mctx.drawImage(canvasEl, 0, 0);
-    return merged.toDataURL('image/png');
+    const dataUrl = merged.toDataURL('image/png');
+    return dataUrl.replace(/^data:image\/png;base64,/, '');
   }
 
   // ------------------------------------------------------------------
@@ -308,7 +309,6 @@
     ctx.fillStyle = color;
     ctx.fillText(textInputValue, textInputX, textInputY);
     textInputVisible = false;
-    pushSnapshot();
   }
 
   // ------------------------------------------------------------------
@@ -387,9 +387,9 @@
   }
 
   function onKeyDown(e: KeyboardEvent) {
-    if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'y')) {
       e.preventDefault();
-      if (e.shiftKey) {
+      if (e.key === 'y' || (e.key === 'z' && e.shiftKey)) {
         redo();
       } else {
         undo();
