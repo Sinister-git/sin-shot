@@ -142,8 +142,6 @@ pub fn run() {
             capture::capture_area,
             clipboard::copy_to_clipboard,
             clipboard::read_from_clipboard,
-            hotkeys::register_hotkey,
-            hotkeys::unregister_hotkey,
             overlay::start_capture,
             overlay::cancel_capture,
             overlay::get_monitors,

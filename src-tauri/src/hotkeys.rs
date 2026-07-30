@@ -8,8 +8,7 @@
 //! on Linux even though the APIs are Windows-only.
 
 use serde::Serialize;
-use std::sync::Mutex;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter};
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -35,67 +34,6 @@ impl HotkeyState {
             hotkeys_registered: Vec::new(),
         }
     }
-}
-
-// ---------------------------------------------------------------------------
-// Tauri commands
-// ---------------------------------------------------------------------------
-
-/// Register a global hotkey.
-///
-/// When the combo is pressed, a `hotkey-pressed` event is emitted with the
-/// combo string as payload.
-#[tauri::command]
-pub async fn register_hotkey(
-    app: AppHandle,
-    state: State<'_, Mutex<HotkeyState>>,
-    key_combo: String,
-) -> Result<(), String> {
-    let mut guard = state.lock().map_err(|e| {
-        let msg = format!("Failed to lock HotkeyState: {}", e);
-        tracing::error!("{}", msg);
-        msg
-    })?;
-
-    // De-duplicate
-    if guard.hotkeys_registered.contains(&key_combo) {
-        return Ok(());
-    }
-
-    platform::register(&key_combo, app).map_err(|e| {
-        tracing::error!("Failed to register hotkey '{}': {}", key_combo, e);
-        e
-    })?;
-
-    tracing::info!("Registered hotkey: {}", key_combo);
-    guard.hotkeys_registered.push(key_combo);
-    Ok(())
-}
-
-/// Unregister a previously registered global hotkey.
-#[tauri::command]
-pub async fn unregister_hotkey(
-    state: State<'_, Mutex<HotkeyState>>,
-    key_combo: String,
-) -> Result<(), String> {
-    let mut guard = state.lock().map_err(|e| {
-        let msg = format!("Failed to lock HotkeyState: {}", e);
-        tracing::error!("{}", msg);
-        msg
-    })?;
-
-    if !guard.hotkeys_registered.contains(&key_combo) {
-        return Ok(());
-    }
-
-    platform::unregister(&key_combo).map_err(|e| {
-        tracing::error!("Failed to unregister hotkey '{}': {}", key_combo, e);
-        e
-    })?;
-
-    guard.hotkeys_registered.retain(|k| k != &key_combo);
-    tracing::info!("Unregistered hotkey: {}", key_combo);
-    Ok(())
 }
 
 // ---------------------------------------------------------------------------
