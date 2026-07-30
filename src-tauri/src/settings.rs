@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use tauri::{AppHandle, Manager, State};
 
-use crate::hotkeys::HotkeyState;
+use crate::hotkeys::{self, HotkeyState};
 
 // ---------------------------------------------------------------------------
 // Settings struct
@@ -109,14 +109,66 @@ pub async fn get_settings(app: AppHandle) -> Result<Settings, String> {
     }
 }
 
-/// Persist settings to disk.
+/// Persist settings to disk and re-register hotkeys if they changed.
 #[tauri::command]
-pub async fn save_settings(app: AppHandle, mut settings: Settings) -> Result<(), String> {
+pub async fn save_settings(
+    app: AppHandle,
+    state: State<'_, std::sync::Mutex<HotkeyState>>,
+    mut settings: Settings,
+) -> Result<(), String> {
+    // Snapshot old settings before overwriting the file
+    let old_settings = load_settings_sync(&app);
+
     settings.jpeg_quality = settings.jpeg_quality.clamp(60, 100);
     let path = settings_path(&app)?;
     let raw =
         serde_json::to_string_pretty(&settings).map_err(|e| format!("serialize settings: {e}"))?;
-    std::fs::write(&path, raw).map_err(|e| format!("write settings file: {e}"))
+    std::fs::write(&path, raw).map_err(|e| format!("write settings file: {e}"))?;
+
+    // If hotkey combos changed, unregister the old and register the new
+    if old_settings.hotkey_full != settings.hotkey_full {
+        let _ = hotkeys::unregister_hotkey_platform(&old_settings.hotkey_full);
+        match hotkeys::register_hotkey_platform(&settings.hotkey_full, app.clone()) {
+            Ok(()) => {
+                if let Ok(mut guard) = state.lock() {
+                    guard
+                        .hotkeys_registered
+                        .retain(|k| k != &old_settings.hotkey_full && k != &settings.hotkey_full);
+                    guard.hotkeys_registered.push(settings.hotkey_full.clone());
+                }
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "Failed to register hotkey '{}': {}",
+                    settings.hotkey_full,
+                    e
+                );
+            }
+        }
+    }
+
+    if old_settings.hotkey_area != settings.hotkey_area {
+        let _ = hotkeys::unregister_hotkey_platform(&old_settings.hotkey_area);
+        match hotkeys::register_hotkey_platform(&settings.hotkey_area, app.clone()) {
+            Ok(()) => {
+                if let Ok(mut guard) = state.lock() {
+                    guard
+                        .hotkeys_registered
+                        .retain(|k| k != &old_settings.hotkey_area && k != &settings.hotkey_area);
+                    guard.hotkeys_registered.push(settings.hotkey_area.clone());
+                }
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "Failed to register hotkey '{}': {}",
+                    settings.hotkey_area,
+                    e
+                );
+            }
+        }
+    }
+
+    Ok(())
 }
 
 /// Return the list of currently registered hotkey combos.
