@@ -51,15 +51,23 @@ pub async fn register_hotkey(
     state: State<'_, Mutex<HotkeyState>>,
     key_combo: String,
 ) -> Result<(), String> {
-    let mut guard = state.lock().map_err(|e| e.to_string())?;
+    let mut guard = state.lock().map_err(|e| {
+        let msg = format!("Failed to lock HotkeyState: {}", e);
+        tracing::error!("{}", msg);
+        msg
+    })?;
 
     // De-duplicate
     if guard.hotkeys_registered.contains(&key_combo) {
         return Ok(());
     }
 
-    platform::register(&key_combo, app)?;
+    platform::register(&key_combo, app).map_err(|e| {
+        tracing::error!("Failed to register hotkey '{}': {}", key_combo, e);
+        e
+    })?;
 
+    tracing::info!("Registered hotkey: {}", key_combo);
     guard.hotkeys_registered.push(key_combo);
     Ok(())
 }
@@ -70,15 +78,23 @@ pub async fn unregister_hotkey(
     state: State<'_, Mutex<HotkeyState>>,
     key_combo: String,
 ) -> Result<(), String> {
-    let mut guard = state.lock().map_err(|e| e.to_string())?;
+    let mut guard = state.lock().map_err(|e| {
+        let msg = format!("Failed to lock HotkeyState: {}", e);
+        tracing::error!("{}", msg);
+        msg
+    })?;
 
     if !guard.hotkeys_registered.contains(&key_combo) {
         return Ok(());
     }
 
-    platform::unregister(&key_combo)?;
+    platform::unregister(&key_combo).map_err(|e| {
+        tracing::error!("Failed to unregister hotkey '{}': {}", key_combo, e);
+        e
+    })?;
 
     guard.hotkeys_registered.retain(|k| k != &key_combo);
+    tracing::info!("Unregistered hotkey: {}", key_combo);
     Ok(())
 }
 
@@ -142,14 +158,20 @@ mod platform {
                 "win" | "windows" | "meta" => modifiers |= MOD_WIN.0,
                 _ => {
                     if vk.is_some() {
-                        return Err(format!("multiple non-modifier keys in combo: {combo}"));
+                        let msg = format!("multiple non-modifier keys in combo: {combo}");
+                        tracing::error!("{}", msg);
+                        return Err(msg);
                     }
                     vk = Some(key_name_to_vk(part)?);
                 }
             }
         }
 
-        let vk = vk.ok_or_else(|| format!("no key found in combo: {combo}"))?;
+        let vk = vk.ok_or_else(|| {
+            let msg = format!("no key found in combo: {combo}");
+            tracing::error!("{}", msg);
+            msg
+        })?;
         Ok((modifiers, vk))
     }
 
@@ -364,7 +386,10 @@ mod platform {
         let tx = THREAD_TX.lock().unwrap();
         let tx = tx
             .as_ref()
-            .ok_or("hotkey thread not initialised — call init() first")?;
+            .ok_or_else(|| {
+                tracing::error!("hotkey thread not initialised — call init() first");
+                "hotkey thread not initialised — call init() first".to_string()
+            })?;
 
         tx.send(ThreadCmd::Register {
             id,
@@ -372,11 +397,19 @@ mod platform {
             vk,
             result_tx,
         })
-        .map_err(|e| format!("failed to send register command: {e}"))?;
+        .map_err(|e| {
+            let msg = format!("failed to send register command: {e}");
+            tracing::error!("{}", msg);
+            msg
+        })?;
 
         result_rx
             .recv()
-            .map_err(|e| format!("hotkey thread disconnected: {e}"))??;
+            .map_err(|e| {
+                let msg = format!("hotkey thread disconnected: {e}");
+                tracing::error!("{}", msg);
+                msg
+            })??;
 
         // Store combo→id mapping for unregistration
         COMBO_IDS.lock().unwrap().insert(combo.to_string(), id);
@@ -392,13 +425,24 @@ mod platform {
             let map = COMBO_IDS.lock().unwrap();
             map.get(combo).copied()
         }
-        .ok_or_else(|| format!("hotkey not registered: {combo}"))?;
+        .ok_or_else(|| {
+            let msg = format!("hotkey not registered: {combo}");
+            tracing::error!("{}", msg);
+            msg
+        })?;
 
         let tx = THREAD_TX.lock().unwrap();
-        let tx = tx.as_ref().ok_or("hotkey thread not initialised")?;
+        let tx = tx.as_ref().ok_or_else(|| {
+            tracing::error!("hotkey thread not initialised");
+            "hotkey thread not initialised".to_string()
+        })?;
 
         tx.send(ThreadCmd::Unregister { id })
-            .map_err(|e| format!("failed to send unregister command: {e}"))?;
+            .map_err(|e| {
+                let msg = format!("failed to send unregister command: {e}");
+                tracing::error!("{}", msg);
+                msg
+            })?;
 
         COMBO_IDS.lock().unwrap().remove(combo);
 

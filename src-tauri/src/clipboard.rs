@@ -24,11 +24,19 @@ pub async fn copy_to_clipboard(
     state: State<'_, Mutex<ClipboardState>>,
     image_data_base64: String,
 ) -> Result<(), String> {
-    let mut guard = state.lock().map_err(|e| e.to_string())?;
-    let bytes = base64_decode(&image_data_base64)?;
+    let mut guard = state.lock().map_err(|e| {
+        let msg = format!("Failed to lock ClipboardState: {}", e);
+        tracing::error!("{}", msg);
+        msg
+    })?;
+    let bytes = base64_decode(&image_data_base64).map_err(|e| {
+        tracing::error!("copy_to_clipboard: base64 decode failed: {}", e);
+        e
+    })?;
     let len = bytes.len();
     // TODO: write image bytes to Windows clipboard
     guard.last_clipboard_content = Some(format!("image_{len}_bytes"));
+    tracing::info!("Copied {} bytes to clipboard", len);
     Ok(())
 }
 
@@ -44,7 +52,11 @@ fn base64_decode(input: &str) -> Result<Vec<u8>, String> {
 pub async fn read_from_clipboard(
     state: State<'_, Mutex<ClipboardState>>,
 ) -> Result<Option<Vec<u8>>, String> {
-    let _guard = state.lock().map_err(|e| e.to_string())?;
+    let _guard = state.lock().map_err(|e| {
+        let msg = format!("Failed to lock ClipboardState: {}", e);
+        tracing::error!("{}", msg);
+        msg
+    })?;
     // TODO: read image from Windows clipboard
     Ok(None)
 }

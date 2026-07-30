@@ -29,11 +29,20 @@ pub async fn upload_screenshot(
     image_data_base64: String,
     _filename: String,
 ) -> Result<String, String> {
-    let mut guard = state.lock().map_err(|e| e.to_string())?;
-    let _bytes = base64_decode(&image_data_base64)?;
+    let mut guard = state.lock().map_err(|e| {
+        let msg = format!("Failed to lock UploadState: {}", e);
+        tracing::error!("{}", msg);
+        msg
+    })?;
+    let _bytes = base64_decode(&image_data_base64).map_err(|e| {
+        tracing::error!("upload_screenshot: base64 decode failed: {}", e);
+        e
+    })?;
     // TODO: POST multipart to sinister.ovh
     guard.last_upload_url = Some("https://sinister.ovh/stub.png".into());
-    Ok(guard.last_upload_url.clone().unwrap())
+    let url = guard.last_upload_url.clone().unwrap();
+    tracing::info!("Uploaded screenshot to {}", url);
+    Ok(url)
 }
 
 fn base64_decode(input: &str) -> Result<Vec<u8>, String> {

@@ -16,9 +16,46 @@ use tauri::{
     tray::TrayIconBuilder,
 };
 use upload::UploadState;
+use std::path::PathBuf;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // ── File + console logging ─────────────────────────────────────────
+    let log_dir = dirs::data_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("com.sinister.sin-shot")
+        .join("logs");
+    std::fs::create_dir_all(&log_dir).expect("failed to create log directory");
+
+    let file_appender = tracing_appender::rolling::daily(&log_dir, "sin-shot.log");
+    let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
+    // Keep the flush guard alive for the lifetime of the application.
+    let _log_guard = Box::leak(Box::new(guard));
+
+    let file_layer = tracing_subscriber::fmt::layer()
+        .with_ansi(false)
+        .with_writer(non_blocking);
+
+    let stdout_layer = tracing_subscriber::fmt::layer()
+        .with_writer(std::io::stdout);
+
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
+
+    tracing_subscriber::registry()
+        .with(filter)
+        .with(file_layer)
+        .with(stdout_layer)
+        .init();
+
+    tracing::info!(
+        "Sin Shot v{} starting — config path: {}",
+        env!("CARGO_PKG_VERSION"),
+        log_dir.parent().unwrap_or(&log_dir).display()
+    );
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(std::sync::Mutex::new(CaptureState::new()))
@@ -39,12 +76,16 @@ pub fn run() {
             let r1 = hotkeys::register_hotkey_platform(&persisted.hotkey_full, handle.clone());
             let r2 = hotkeys::register_hotkey_platform(&persisted.hotkey_area, handle);
 
-            // Log registration failures so the user can diagnose conflicts
+            // Log registration results so the user can diagnose conflicts
             if let Err(ref e) = r1 {
-                tracing::warn!("Failed to register hotkey '{}': {}", persisted.hotkey_full, e);
+                tracing::error!("Failed to register hotkey '{}': {}", persisted.hotkey_full, e);
+            } else {
+                tracing::info!("Registered hotkey: {}", persisted.hotkey_full);
             }
             if let Err(ref e) = r2 {
-                tracing::warn!("Failed to register hotkey '{}': {}", persisted.hotkey_area, e);
+                tracing::error!("Failed to register hotkey '{}': {}", persisted.hotkey_area, e);
+            } else {
+                tracing::info!("Registered hotkey: {}", persisted.hotkey_area);
             }
 
             // Sync HotkeyState so the frontend can discover registered hotkeys
