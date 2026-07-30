@@ -163,12 +163,7 @@
       }
     }
     try {
-      if (oldCombo && oldCombo !== entry.combo) {
-        await invoke('unregister_hotkey', { keyCombo: oldCombo });
-      }
-      await invoke('register_hotkey', { keyCombo: entry.combo });
-
-      // Persist combo to settings
+      // Update settings (save_settings handles unregister/reregister as sole owner)
       if (entry.id === 'capture_full') {
         settings.hotkey_full = entry.combo;
       } else if (entry.id === 'capture_area') {

@@ -155,7 +155,8 @@ pub async fn save_settings(
     })?;
     tracing::info!("Settings saved to {}", path.display());
 
-    // If hotkey combos changed, unregister the old and register the new
+    // If hotkey combos changed, unregister the old and register the new.
+    // On failure, re-register the old hotkey so the user isn't left without one.
     if old_settings.hotkey_full != settings.hotkey_full {
         let _ = hotkeys::unregister_hotkey_platform(&old_settings.hotkey_full);
         match hotkeys::register_hotkey_platform(&settings.hotkey_full, app.clone()) {
@@ -173,6 +174,13 @@ pub async fn save_settings(
                     settings.hotkey_full,
                     e
                 );
+                // Re-register the old hotkey so the user still has a working combo
+                let _ = hotkeys::register_hotkey_platform(&old_settings.hotkey_full, app.clone());
+                return Err(format!(
+                    "Failed to register hotkey '{}': {}",
+                    settings.hotkey_full,
+                    e
+                ));
             }
         }
     }
@@ -194,6 +202,13 @@ pub async fn save_settings(
                     settings.hotkey_area,
                     e
                 );
+                // Re-register the old hotkey so the user still has a working combo
+                let _ = hotkeys::register_hotkey_platform(&old_settings.hotkey_area, app.clone());
+                return Err(format!(
+                    "Failed to register hotkey '{}': {}",
+                    settings.hotkey_area,
+                    e
+                ));
             }
         }
     }
