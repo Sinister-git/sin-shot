@@ -190,6 +190,7 @@
   }
 
   async function cancelCapture() {
+    if (entering) return;
     mode = null;
     entering = true;
     try {
@@ -279,7 +280,7 @@
     // to confirm (Enter) or cancel (Escape).
     const w = Math.abs(selCurrent.x - selStart.x);
     const h = Math.abs(selCurrent.y - selStart.y);
-    if (w < 2 && h < 2) {
+    if (w < 2 || h < 2) {
       selConfirmed = null;
     } else {
       selConfirmed = {
