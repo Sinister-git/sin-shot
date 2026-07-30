@@ -20,8 +20,8 @@ pub struct Settings {
     // General
     pub save_folder: String,
     pub filename_pattern: String,
-    pub image_format: String,   // "png", "jpeg", "webp"
-    pub jpeg_quality: u8,       // 60–100
+    pub image_format: String, // "png", "jpeg", "webp"
+    pub jpeg_quality: u8,     // 60–100
     pub start_with_windows: bool,
     pub play_sound_on_capture: bool,
     // Hotkeys
@@ -85,12 +85,10 @@ fn settings_path(app: &AppHandle) -> Result<PathBuf, String> {
 
 pub fn load_settings_sync(app: &AppHandle) -> Settings {
     match settings_path(app) {
-        Ok(path) if path.exists() => {
-            match std::fs::read_to_string(&path) {
-                Ok(raw) => serde_json::from_str(&raw).unwrap_or_default(),
-                Err(_) => Settings::default(),
-            }
-        }
+        Ok(path) if path.exists() => match std::fs::read_to_string(&path) {
+            Ok(raw) => serde_json::from_str(&raw).unwrap_or_default(),
+            Err(_) => Settings::default(),
+        },
         _ => Settings::default(),
     }
 }
@@ -104,8 +102,7 @@ pub fn load_settings_sync(app: &AppHandle) -> Settings {
 pub async fn get_settings(app: AppHandle) -> Result<Settings, String> {
     let path = settings_path(&app)?;
     if path.exists() {
-        let raw = std::fs::read_to_string(&path)
-            .map_err(|e| format!("read settings file: {e}"))?;
+        let raw = std::fs::read_to_string(&path).map_err(|e| format!("read settings file: {e}"))?;
         serde_json::from_str(&raw).map_err(|e| format!("parse settings: {e}"))
     } else {
         Ok(Settings::default())
@@ -117,8 +114,8 @@ pub async fn get_settings(app: AppHandle) -> Result<Settings, String> {
 pub async fn save_settings(app: AppHandle, mut settings: Settings) -> Result<(), String> {
     settings.jpeg_quality = settings.jpeg_quality.clamp(60, 100);
     let path = settings_path(&app)?;
-    let raw = serde_json::to_string_pretty(&settings)
-        .map_err(|e| format!("serialize settings: {e}"))?;
+    let raw =
+        serde_json::to_string_pretty(&settings).map_err(|e| format!("serialize settings: {e}"))?;
     std::fs::write(&path, raw).map_err(|e| format!("write settings file: {e}"))
 }
 
@@ -136,7 +133,9 @@ pub async fn get_hotkeys(
 pub async fn show_settings(app: AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("settings") {
         window.show().map_err(|e| format!("show settings: {e}"))?;
-        window.set_focus().map_err(|e| format!("focus settings: {e}"))?;
+        window
+            .set_focus()
+            .map_err(|e| format!("focus settings: {e}"))?;
     } else {
         // Build from the config entry with label "settings"
         use tauri::WebviewWindowBuilder;
@@ -153,7 +152,9 @@ pub async fn show_settings(app: AppHandle) -> Result<(), String> {
             .build()
             .map_err(|e| format!("build settings window: {e}"))?;
         window.show().map_err(|e| format!("show settings: {e}"))?;
-        window.set_focus().map_err(|e| format!("focus settings: {e}"))?;
+        window
+            .set_focus()
+            .map_err(|e| format!("focus settings: {e}"))?;
     }
     Ok(())
 }
@@ -200,15 +201,24 @@ mod tests {
     #[test]
     fn jpeg_quality_clamping() {
         // Below minimum should clamp to 60
-        let s = Settings { jpeg_quality: 0, ..Settings::default() };
+        let s = Settings {
+            jpeg_quality: 0,
+            ..Settings::default()
+        };
         let clamped = s.jpeg_quality.clamp(60, 100);
         assert_eq!(clamped, 60);
         // Above maximum should clamp to 100
-        let s = Settings { jpeg_quality: 255, ..Settings::default() };
+        let s = Settings {
+            jpeg_quality: 255,
+            ..Settings::default()
+        };
         let clamped = s.jpeg_quality.clamp(60, 100);
         assert_eq!(clamped, 100);
         // Within range should stay unchanged
-        let s = Settings { jpeg_quality: 80, ..Settings::default() };
+        let s = Settings {
+            jpeg_quality: 80,
+            ..Settings::default()
+        };
         let clamped = s.jpeg_quality.clamp(60, 100);
         assert_eq!(clamped, 80);
     }

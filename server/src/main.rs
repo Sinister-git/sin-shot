@@ -122,12 +122,7 @@ const ALLOWED_EXTENSIONS: &[(&str, &str)] = &[
 ];
 
 fn detect_mime(data: &[u8]) -> Option<(&'static str, &'static str)> {
-    if data.len() >= 8
-        && data[0] == 0x89
-        && data[1] == b'P'
-        && data[2] == b'N'
-        && data[3] == b'G'
-    {
+    if data.len() >= 8 && data[0] == 0x89 && data[1] == b'P' && data[2] == b'N' && data[3] == b'G' {
         return Some(("image/png", ".png"));
     }
     if data.len() >= 2 && data[0] == 0xFF && data[1] == 0xD8 {
@@ -252,7 +247,10 @@ async fn require_auth(
     let token = auth_header.strip_prefix("Bearer ").unwrap_or("");
 
     if token.is_empty() {
-        return Err(error_response(StatusCode::UNAUTHORIZED, "missing authorization token"));
+        return Err(error_response(
+            StatusCode::UNAUTHORIZED,
+            "missing authorization token",
+        ));
     }
 
     verify_google_token(token, client_id)
@@ -351,10 +349,7 @@ async fn handle_upload(
     Json(UploadResponse { url, key }).into_response()
 }
 
-async fn handle_serve(
-    State(state): State<Arc<AppState>>,
-    Path(key): Path<String>,
-) -> Response {
+async fn handle_serve(State(state): State<Arc<AppState>>, Path(key): Path<String>) -> Response {
     // Security: reject paths with slashes or empty keys
     if key.is_empty() || key.contains('/') || key.contains('\\') || key == "api" {
         return error_response(StatusCode::NOT_FOUND, "not found");
@@ -410,10 +405,7 @@ async fn handle_gallery(
         Ok(e) => e,
         Err(e) => {
             tracing::error!("Failed to read storage dir: {}", e);
-            return error_response(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "failed to read gallery",
-            );
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "failed to read gallery");
         }
     };
 
@@ -455,12 +447,10 @@ async fn handle_gallery(
             .modified()
             .ok()
             .and_then(|t| {
-                t.duration_since(std::time::UNIX_EPOCH)
-                    .ok()
-                    .and_then(|d| {
-                        DateTime::<Utc>::from_timestamp(d.as_secs() as i64, d.subsec_nanos())
-                            .map(|dt| dt.to_rfc3339())
-                    })
+                t.duration_since(std::time::UNIX_EPOCH).ok().and_then(|d| {
+                    DateTime::<Utc>::from_timestamp(d.as_secs() as i64, d.subsec_nanos())
+                        .map(|dt| dt.to_rfc3339())
+                })
             })
             .unwrap_or_else(|| "unknown".to_string());
 
@@ -519,10 +509,7 @@ async fn handle_delete(
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
             Err(e) => {
                 tracing::error!("Failed to delete {}{}: {}", key, ext, e);
-                return error_response(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "failed to delete image",
-                );
+                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "failed to delete image");
             }
         }
     }
@@ -601,11 +588,7 @@ async fn main() {
     let cors = CorsLayer::new()
         .allow_origin(allowed_origin)
         .allow_methods([Method::GET, Method::POST, Method::DELETE, Method::OPTIONS])
-        .allow_headers([
-            header::AUTHORIZATION,
-            header::CONTENT_TYPE,
-            header::ACCEPT,
-        ]);
+        .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE, header::ACCEPT]);
 
     let favicon_path = config.static_dir.join("favicon.png");
     let index_path = config.static_dir.join("index.html");
@@ -621,9 +604,7 @@ async fn main() {
         .route("/x/{key}", get(handle_serve))
         .route("/{key}", get(handle_serve))
         // Fallback: static files from gallery-web build, then index.html for SPA routing
-        .fallback_service(
-            ServeDir::new(static_dir).fallback(ServeFile::new(index_path)),
-        )
+        .fallback_service(ServeDir::new(static_dir).fallback(ServeFile::new(index_path)))
         .layer(cors)
         .layer(RequestBodyLimitLayer::new(
             config.max_file_size + 1024 * 1024,
