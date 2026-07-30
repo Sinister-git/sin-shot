@@ -298,6 +298,7 @@
   }
 
   function commitText() {
+    if (!textInputVisible) return;
     if (!ctx || !textInputValue.trim()) {
       textInputVisible = false;
       return;
@@ -330,7 +331,8 @@
     canvasEl.setPointerCapture(e.pointerId);
 
     if (tool === 'pen' || tool === 'blur' || tool === 'eraser') {
-      pushSnapshot();
+      redoStack = [];
+      updateHistoryState();
       if (tool === 'pen') {
         // Single dot on click
         drawPen(pos.x, pos.y, pos.x, pos.y);
