@@ -95,7 +95,8 @@ pub async fn get_settings(app: AppHandle) -> Result<Settings, String> {
 
 /// Persist settings to disk.
 #[tauri::command]
-pub async fn save_settings(app: AppHandle, settings: Settings) -> Result<(), String> {
+pub async fn save_settings(app: AppHandle, mut settings: Settings) -> Result<(), String> {
+    settings.jpeg_quality = settings.jpeg_quality.clamp(60, 100);
     let path = settings_path(&app)?;
     let raw = serde_json::to_string_pretty(&settings)
         .map_err(|e| format!("serialize settings: {e}"))?;

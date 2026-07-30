@@ -129,13 +129,12 @@
     e.stopPropagation();
 
     // Ignore lone modifier presses
-    if (['Control', 'Shift', 'Alt', 'Meta'].includes(e.key)) return;
+    if (['Control', 'Shift', 'Alt'].includes(e.key)) return;
 
     const parts: string[] = [];
     if (e.ctrlKey) parts.push('Ctrl');
     if (e.shiftKey) parts.push('Shift');
     if (e.altKey) parts.push('Alt');
-    if (e.metaKey) parts.push('Win');
 
     // Normalise key name
     let key = e.key;
@@ -147,17 +146,18 @@
     parts.push(key);
 
     const combo = parts.join('+');
+    const oldCombo = entry.combo;
     entry.combo = combo;
     entry.recording = false;
 
-    // Persist: unregister old, register new
-    handleHotkeyChange(entry);
+    handleHotkeyChange(entry, oldCombo);
   }
 
-  async function handleHotkeyChange(entry: HotkeyEntry) {
+  async function handleHotkeyChange(entry: HotkeyEntry, oldCombo: string) {
     try {
-      // The backend handles deduplication and unregistration internally.
-      // We'll just re-register the new combo.
+      if (oldCombo && oldCombo !== entry.combo) {
+        await invoke('unregister_hotkey', { keyCombo: oldCombo });
+      }
       await invoke('register_hotkey', { keyCombo: entry.combo });
       showToast(`Hotkey "${entry.label}" updated to ${entry.combo}`);
     } catch (e) {
