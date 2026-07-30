@@ -3,7 +3,7 @@ import { fetchGallery, deleteImage, formatBytes, formatDate } from './gallery-ap
 
 // Mock fetch globally
 const mockFetch = vi.fn();
-global.fetch = mockFetch;
+globalThis.fetch = mockFetch as any;
 
 beforeEach(() => {
   vi.resetAllMocks();
