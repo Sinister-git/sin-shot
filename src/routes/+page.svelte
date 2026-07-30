@@ -2,8 +2,6 @@
   import Overlay from '$lib/components/Overlay.svelte';
 </script>
 
-<svelte:window />
-
 <main>
   <h1>Sin Shot</h1>
   <p>Windows screenshot tool — capture, annotate, share.</p>

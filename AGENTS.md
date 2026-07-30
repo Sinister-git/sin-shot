@@ -10,7 +10,7 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 - **Target**: Windows only (DXGI/DirectX capture, NSIS bundle)
 - **Frontend**: `npm run dev` (Vite), `npm run build` (static SPA to `build/`)
 - **Tauri**: `npm run tauri dev`, `npm run tauri build` — uses `src-tauri/`
-- **Rust modules**: `capture.rs` (DXGI), `hotkeys.rs` (global hotkeys), `overlay.rs` (window resize/show/hide + monitor enum), `clipboard.rs`, `settings.rs` (user prefs persistence), `upload.rs` (→ sinister.ovh)
+- **Rust modules**: `capture.rs` (DXGI), `hotkeys.rs` (global hotkeys), `overlay.rs` (window resize/show/hide + monitor enum), `clipboard.rs`, `save.rs` (save to Pictures/Sin Shot/), `settings.rs` (user prefs persistence), `upload.rs` (→ sinister.ovh)
 - **Settings persistence**: JSON file at `app_data_dir()/settings.json`, `Settings` struct with `#[serde(default)]`, loaded via `get_settings` / persisted via `save_settings` Tauri commands
 - **Settings window**: normal framed window (label `"settings"`, URL `/settings`), created on-demand in `show_settings` command, accessible from tray menu
 - **Tray**: built in `setup()` with `TrayIconBuilder`, menu items "Settings" (spawns `show_settings`) and "Quit"
@@ -18,6 +18,8 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 - **Rust lint**: `cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings`
 - **Frontend test**: `npm test` (vitest), `npm run check` (svelte-check)
 - **Window config**: frameless, transparent, always-on-top overlay for capture mode
+- **Annotation editor components**: `AnnotationCanvas.svelte` (HTML5 Canvas, tools: pen/arrow/rect/text/blur/eraser, 50-op undo/redo), `Toolbar.svelte` (vertical, right side), `ActionBar.svelte` (copy/save/upload/cancel)
+- **Svelte 5 runes**: `$state`, `$props`, `$bindable()`, `$effect` — no legacy stores
 - **No-mistakes gate**: push via `git push no-mistakes <branch>`
 
 ## Sin Shot Server — Self-Hosted Upload Server
