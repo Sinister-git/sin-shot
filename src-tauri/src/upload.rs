@@ -1,10 +1,10 @@
-/// HTTP multipart upload client.
-///
-/// Stub — will POST screenshots to sinister.ovh as multipart/form-data.
-/// Uses reqwest for async HTTP.
+//! HTTP multipart upload client.
+//!
+//! Stub — will POST screenshots to sinister.ovh as multipart/form-data.
+//! Uses reqwest for async HTTP.
 
-use tauri::State;
 use std::sync::Mutex;
+use tauri::State;
 
 #[allow(dead_code)]
 pub struct UploadState {
