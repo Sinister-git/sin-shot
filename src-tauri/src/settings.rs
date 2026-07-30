@@ -24,8 +24,6 @@ pub struct Settings {
     pub jpeg_quality: u8,       // 60–100
     pub start_with_windows: bool,
     pub play_sound_on_capture: bool,
-    pub copy_url_after_upload: bool,
-
     // Hotkeys
     pub hotkey_full: String,
     pub hotkey_area: String,
@@ -44,7 +42,6 @@ impl Default for Settings {
             jpeg_quality: 85,
             start_with_windows: false,
             play_sound_on_capture: false,
-            copy_url_after_upload: false,
             hotkey_full: "Ctrl+Shift+1".into(),
             hotkey_area: "Ctrl+Shift+2".into(),
             server_url: "https://sinister.ovh/api/upload".into(),

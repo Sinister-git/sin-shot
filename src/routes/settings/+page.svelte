@@ -13,7 +13,6 @@
     jpeg_quality: number;
     start_with_windows: boolean;
     play_sound_on_capture: boolean;
-    copy_url_after_upload: boolean;
     hotkey_full: string;
     hotkey_area: string;
     server_url: string;
@@ -41,7 +40,6 @@
     jpeg_quality: 85,
     start_with_windows: false,
     play_sound_on_capture: false,
-    copy_url_after_upload: false,
     hotkey_full: 'Ctrl+Shift+1',
     hotkey_area: 'Ctrl+Shift+2',
     server_url: 'https://sinister.ovh/api/upload',
@@ -355,13 +353,6 @@
             <input type="checkbox" class="toggle-check" bind:checked={settings.play_sound_on_capture} />
           </label>
 
-          <label class="toggle-row">
-            <span class="toggle-text">
-              <span class="toggle-title">Copy URL after upload</span>
-              <span class="toggle-desc">Automatically copy share link to clipboard</span>
-            </span>
-            <input type="checkbox" class="toggle-check" bind:checked={settings.copy_url_after_upload} />
-          </label>
         </div>
       </div>
 
