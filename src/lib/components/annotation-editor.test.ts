@@ -217,7 +217,7 @@ describe('Tool type', () => {
 describe('Toolbar component', () => {
   it('renders all 6 tool buttons', () => {
     render(Toolbar, { activeTool: 'pen', color: '#ff0000' });
-    const toolLabels = ['Pen', 'Arrow', 'Rectangle', 'Text', 'Blur', 'Eraser'];
+    const toolLabels = ['Pen (P)', 'Arrow (A)', 'Rectangle (R)', 'Text (T)', 'Blur (B)', 'Eraser (E)'];
     for (const label of toolLabels) {
       const btn = screen.getByTitle(label);
       expect(btn).toBeTruthy();
@@ -227,15 +227,15 @@ describe('Toolbar component', () => {
 
   it('marks active tool as pressed', () => {
     render(Toolbar, { activeTool: 'arrow', color: '#ff0000' });
-    const penBtn = screen.getByTitle('Pen');
-    const arrowBtn = screen.getByTitle('Arrow');
+    const penBtn = screen.getByTitle('Pen (P)');
+    const arrowBtn = screen.getByTitle('Arrow (A)');
     expect(penBtn.getAttribute('aria-pressed')).toBe('false');
     expect(arrowBtn.getAttribute('aria-pressed')).toBe('true');
   });
 
   it('changes active tool on click', async () => {
     render(Toolbar, { activeTool: 'pen', color: '#ff0000' });
-    const rectBtn = screen.getByTitle('Rectangle');
+    const rectBtn = screen.getByTitle('Rectangle (R)');
     await fireEvent.click(rectBtn);
     // After click, rectangle should be active
     expect(rectBtn.getAttribute('aria-pressed')).toBe('true');

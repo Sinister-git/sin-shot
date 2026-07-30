@@ -54,6 +54,10 @@
   let uploading = $state(false);
   let uploadUrl: string | null = $state(null);
 
+  // Keyboard tool-switch flash state
+  let flashTool: Tool | null = $state(null);
+  let flashTimeout: ReturnType<typeof setTimeout> | null = null;
+
   // Ref to AnnotationCanvas for export
   let annotationCanvas: AnnotationCanvas | null = $state(null);
 
@@ -165,6 +169,37 @@
 
   function onKeydown(e: KeyboardEvent) {
     if (flowState === 'idle') return;
+
+    // Tool-switching shortcuts (annotation mode only, no modifiers, no input focus)
+    if (
+      flowState === 'annotating' &&
+      !e.ctrlKey &&
+      !e.altKey &&
+      !e.metaKey &&
+      document.activeElement?.tagName !== 'INPUT' &&
+      document.activeElement?.tagName !== 'TEXTAREA'
+    ) {
+      const toolMap: Record<string, Tool> = {
+        p: 'pen',
+        a: 'arrow',
+        r: 'rectangle',
+        t: 'text',
+        b: 'blur',
+        e: 'eraser',
+      };
+      const t = toolMap[e.key.toLowerCase()];
+      if (t) {
+        e.preventDefault();
+        currentTool = t;
+        if (flashTimeout) clearTimeout(flashTimeout);
+        flashTool = t;
+        flashTimeout = setTimeout(() => {
+          flashTool = null;
+          flashTimeout = null;
+        }, 400);
+        return;
+      }
+    }
 
     if (e.key === 'Escape') {
       e.preventDefault();
@@ -570,7 +605,7 @@
         {/if}
       </div>
 
-      <Toolbar bind:activeTool={currentTool} bind:color={currentColor} />
+      <Toolbar bind:activeTool={currentTool} bind:color={currentColor} {flashTool} />
 
       <ActionBar
         onCopy={handleCopy}
