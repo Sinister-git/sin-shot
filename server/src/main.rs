@@ -382,8 +382,17 @@ async fn handle_serve(
 
 async fn handle_gallery(
     State(state): State<Arc<AppState>>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     headers: axum::http::HeaderMap,
 ) -> Response {
+    // Rate limit check
+    {
+        let mut limiter = state.limiter.lock().await;
+        if !limiter.allow(&addr.ip().to_string()) {
+            return error_response(StatusCode::TOO_MANY_REQUESTS, "rate limit exceeded");
+        }
+    }
+
     // Require authentication
     match require_auth(&headers, &state.config.google_client_id).await {
         Ok(_) => {} // authenticated
@@ -470,9 +479,18 @@ async fn handle_gallery(
 
 async fn handle_delete(
     State(state): State<Arc<AppState>>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     headers: axum::http::HeaderMap,
     Path(key): Path<String>,
 ) -> Response {
+    // Rate limit check
+    {
+        let mut limiter = state.limiter.lock().await;
+        if !limiter.allow(&addr.ip().to_string()) {
+            return error_response(StatusCode::TOO_MANY_REQUESTS, "rate limit exceeded");
+        }
+    }
+
     // Require authentication
     match require_auth(&headers, &state.config.google_client_id).await {
         Ok(_) => {}
