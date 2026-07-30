@@ -78,15 +78,16 @@ mod platform {
     use windows::core::Interface;
     use windows::Win32::Graphics::Direct3D::D3D_DRIVER_TYPE_HARDWARE;
     use windows::Win32::Graphics::Direct3D11::{
-        D3D11CreateDevice, ID3D11Device, ID3D11DeviceContext, ID3D11Resource, ID3D11Texture2D,
-        D3D11_BIND_FLAG, D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_MAPPED_SUBRESOURCE,
+        D3D11CreateDevice, ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D,
+        D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_MAPPED_SUBRESOURCE,
         D3D11_MAP_READ, D3D11_SDK_VERSION, D3D11_TEXTURE2D_DESC,
     };
-    use windows::Win32::Graphics::Dxgi::Common::DXGI_OUTPUT_DESC;
     use windows::Win32::Graphics::Dxgi::{
-        CreateDXGIFactory1, IDXGIAdapter1, IDXGIFactory1, IDXGIOutput, IDXGIOutput1,
-        IDXGIOutputDuplication, IDXGIResource, DXGI_ERROR_WAIT_TIMEOUT, DXGI_OUTDUPL_FRAME_INFO,
+        CreateDXGIFactory1, DXGI_OUTPUT_DESC, IDXGIAdapter1, IDXGIFactory1, IDXGIOutput,
+        IDXGIOutput1, IDXGIOutputDuplication, IDXGIResource, DXGI_ERROR_WAIT_TIMEOUT,
+        DXGI_OUTDUPL_FRAME_INFO,
     };
+    use windows::Win32::Foundation::HMODULE;
 
     // -- helpers ---------------------------------------------------------
 
@@ -106,17 +107,16 @@ mod platform {
         let mut device: Option<ID3D11Device> = None;
         let mut context: Option<ID3D11DeviceContext> = None;
 
-        let feature_levels = [];
         let flags = D3D11_CREATE_DEVICE_BGRA_SUPPORT;
 
         unsafe {
             D3D11CreateDevice(
                 None, // default adapter
                 D3D_DRIVER_TYPE_HARDWARE,
-                None, // no software module
+                HMODULE::default(), // no software module
                 flags,
-                &feature_levels,
-                D3D11_SDK_VERSION as u32,
+                None, // feature levels (None = default)
+                D3D11_SDK_VERSION,
                 Some(&mut device),
                 None, // feature level out
                 Some(&mut context),
@@ -195,13 +195,15 @@ mod platform {
             let mut info = DXGI_OUTDUPL_FRAME_INFO::default();
             let mut resource: Option<IDXGIResource> = None;
 
-            let hr = dupl.AcquireNextFrame(1000, &mut info, &mut resource);
-            if hr == DXGI_ERROR_WAIT_TIMEOUT {
-                return Err(
-                    "timeout acquiring next frame — screen may be locked or no updates".into(),
-                );
+            let result = dupl.AcquireNextFrame(1000, &mut info, &mut resource);
+            if let Err(ref e) = result {
+                if e.code() == DXGI_ERROR_WAIT_TIMEOUT {
+                    return Err(
+                        "timeout acquiring next frame — screen may be locked or no updates".into(),
+                    );
+                }
             }
-            hr.map_err(|e| format!("AcquireNextFrame failed: {e}"))?;
+            result.map_err(|e| format!("AcquireNextFrame failed: {e}"))?;
 
             let resource = resource.ok_or("AcquireNextFrame returned null resource")?;
 
@@ -234,8 +236,8 @@ mod platform {
         // Create a staging texture for CPU read-back
         let mut staging_desc = tex_desc;
         staging_desc.Usage = windows::Win32::Graphics::Direct3D11::D3D11_USAGE_STAGING;
-        staging_desc.BindFlags = D3D11_BIND_FLAG(0);
-        staging_desc.CPUAccessFlags = windows::Win32::Graphics::Direct3D11::D3D11_CPU_ACCESS_READ;
+        staging_desc.BindFlags = 0;
+        staging_desc.CPUAccessFlags = windows::Win32::Graphics::Direct3D11::D3D11_CPU_ACCESS_READ.0 as u32;
         staging_desc.MiscFlags = 0;
 
         let staging_tex = {
