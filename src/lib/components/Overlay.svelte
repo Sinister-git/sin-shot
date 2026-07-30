@@ -37,6 +37,7 @@
   let monitors: Monitor[] = $state([]);
   let windowOffset = $state({ x: 0, y: 0 });
   let entering = $state(false);
+  let dpr = $state(typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1);
 
   // Full-monitor mode
   let cursorMonitor: number = $state(-1); // index into monitors[]
@@ -156,7 +157,8 @@
         monitors = [];
       }
 
-      // Compute the window offset (top-left of bounding box).
+      // Compute the window offset (top-left of bounding box) and convert
+      // all monitor coordinates from physical pixels to CSS pixels.
       if (monitors.length > 0) {
         let minX = Infinity;
         let minY = Infinity;
@@ -164,7 +166,16 @@
           if (m.x < minX) minX = m.x;
           if (m.y < minY) minY = m.y;
         }
-        windowOffset = { x: minX, y: minY };
+        const d = window.devicePixelRatio || 1;
+        dpr = d;
+        windowOffset = { x: minX / d, y: minY / d };
+        monitors = monitors.map(m => ({
+          ...m,
+          x: m.x / d,
+          y: m.y / d,
+          width: m.width / d,
+          height: m.height / d,
+        }));
       }
 
       // Tell Rust to resize and show the overlay window.
@@ -287,14 +298,13 @@
   async function confirmAreaCapture() {
     if (!selectionRect) return;
 
-    // Selection rect coordinates are window-relative. Convert to absolute
-    // desktop coordinates by adding the window offset (top-left of the
-    // monitor bounding box). The backend captures all monitors, stitches
-    // them into a virtual-desktop image, and crops to this rect.
-    const x = selectionRect.left + windowOffset.x;
-    const y = selectionRect.top + windowOffset.y;
-    const width = selectionRect.width;
-    const height = selectionRect.height;
+    // Selection rect coordinates are window-relative CSS pixels.
+    // Convert to absolute physical desktop coordinates for the backend.
+    const d = window.devicePixelRatio || 1;
+    const x = (selectionRect.left + windowOffset.x) * d;
+    const y = (selectionRect.top + windowOffset.y) * d;
+    const width = selectionRect.width * d;
+    const height = selectionRect.height * d;
 
     if (width < 2 || height < 2) {
       await cancelCapture();
@@ -414,7 +424,7 @@
         "
       >
         <div class="selection-readout">
-          {Math.round(selectionRect.width)} × {Math.round(selectionRect.height)}
+          {Math.round(selectionRect.width * dpr)} × {Math.round(selectionRect.height * dpr)}
         </div>
       </div>
     {/if}
