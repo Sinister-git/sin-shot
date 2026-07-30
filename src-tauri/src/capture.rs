@@ -464,7 +464,7 @@ mod platform {
                     if dst_end <= desktop.len() {
                         desktop[dst_start..dst_end].copy_from_slice(&rgba[src_start..src_end]);
                     } else {
-                        eprintln!(
+                        tracing::warn!(
                             "capture_desktop_rect: skipping row {} for monitor at ({},{}): \
                              texture width ({}) exceeds desktop bounds (dst_end {} > desktop {})",
                             row,

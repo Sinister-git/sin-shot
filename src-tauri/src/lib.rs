@@ -51,7 +51,7 @@ pub fn run() {
         .init();
 
     tracing::info!(
-        "Sin Shot v{} starting — config path: {}",
+        "Sin Shot v{} starting — data dir: {}",
         env!("CARGO_PKG_VERSION"),
         log_dir.parent().unwrap_or(&log_dir).display()
     );

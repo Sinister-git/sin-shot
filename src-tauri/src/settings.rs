@@ -212,7 +212,11 @@ pub async fn save_settings(
 pub async fn get_hotkeys(
     state: State<'_, std::sync::Mutex<HotkeyState>>,
 ) -> Result<Vec<String>, String> {
-    let guard = state.lock().map_err(|e| e.to_string())?;
+    let guard = state.lock().map_err(|e| {
+        let msg = e.to_string();
+        tracing::error!("get_hotkeys: {}", msg);
+        msg
+    })?;
     Ok(guard.hotkeys_registered.clone())
 }
 
