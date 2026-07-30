@@ -24,6 +24,10 @@ ENV STORAGE_DIR=/app/uploads
 ENV PORT=8080
 ENV MAX_FILE_SIZE_MB=25
 ENV BASE_URL=https://sinister.ovh
+# Google OAuth client ID for gallery auth (optional — disables auth if empty)
+ENV GOOGLE_CLIENT_ID=
+# Comma-separated CORS origins (defaults to BASE_URL origin)
+ENV CORS_ORIGINS=
 
 EXPOSE 8080
 ENTRYPOINT ["/app/sin-shot-server"]

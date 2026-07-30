@@ -1,11 +1,12 @@
 use axum::{
     extract::{ConnectInfo, Multipart, Path, State},
-    http::{header, StatusCode},
+    http::{header, Method, StatusCode},
     response::{IntoResponse, Json, Response},
-    routing::{get, post},
+    routing::{delete, get, post},
     Router,
 };
-use serde::Serialize;
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
     net::SocketAddr,
@@ -14,7 +15,10 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::{fs, sync::Mutex};
-use tower_http::limit::RequestBodyLimitLayer;
+use tower_http::{
+    cors::{AllowOrigin, CorsLayer},
+    limit::RequestBodyLimitLayer,
+};
 
 // ── Config ──────────────────────────────────────────────────────────
 
@@ -24,6 +28,7 @@ struct Config {
     storage_dir: PathBuf,
     max_file_size: usize, // bytes
     base_url: String,
+    google_client_id: String,
 }
 
 fn load_config() -> Config {
@@ -44,6 +49,7 @@ fn load_config() -> Config {
             .unwrap_or_else(|_| "https://sinister.ovh".into())
             .trim_end_matches('/')
             .to_string(),
+        google_client_id: std::env::var("GOOGLE_CLIENT_ID").unwrap_or_default(),
     }
 }
 
@@ -88,7 +94,6 @@ impl RateLimiter {
         }
     }
 
-    /// Periodically clean up old entries
     fn cleanup(&mut self) {
         let now = Instant::now();
         self.buckets
@@ -112,7 +117,12 @@ const ALLOWED_EXTENSIONS: &[(&str, &str)] = &[
 ];
 
 fn detect_mime(data: &[u8]) -> Option<(&'static str, &'static str)> {
-    if data.len() >= 8 && data[0] == 0x89 && data[1] == b'P' && data[2] == b'N' && data[3] == b'G' {
+    if data.len() >= 8
+        && data[0] == 0x89
+        && data[1] == b'P'
+        && data[2] == b'N'
+        && data[3] == b'G'
+    {
         return Some(("image/png", ".png"));
     }
     if data.len() >= 2 && data[0] == 0xFF && data[1] == 0xD8 {
@@ -157,9 +167,92 @@ struct ErrorResponse {
     error: String,
 }
 
+#[derive(Serialize)]
+struct GalleryItem {
+    key: String,
+    url: String,
+    filename: String,
+    mime_type: String,
+    size_bytes: u64,
+    uploaded_at: String,
+}
+
+#[derive(Serialize)]
+struct GalleryResponse {
+    images: Vec<GalleryItem>,
+}
+
+#[derive(Deserialize)]
+struct GoogleTokenInfo {
+    #[serde(default)]
+    #[allow(dead_code)]
+    email: String,
+    #[serde(default)]
+    aud: String,
+    #[serde(default)]
+    #[allow(dead_code)]
+    sub: String,
+    #[serde(default)]
+    error: String,
+    #[serde(default, rename = "error_description")]
+    #[allow(dead_code)]
+    error_description: String,
+}
+
 fn error_response(status: StatusCode, msg: impl Into<String>) -> Response {
     let body = Json(ErrorResponse { error: msg.into() });
     (status, body).into_response()
+}
+
+// ── Auth: verify Google ID token ────────────────────────────────────
+
+async fn verify_google_token(token: &str, client_id: &str) -> Result<GoogleTokenInfo, String> {
+    let client = reqwest::Client::new();
+    let resp = client
+        .get(format!(
+            "https://oauth2.googleapis.com/tokeninfo?id_token={}",
+            token
+        ))
+        .send()
+        .await
+        .map_err(|e| format!("failed to verify token: {}", e))?;
+
+    let info: GoogleTokenInfo = resp
+        .json()
+        .await
+        .map_err(|e| format!("failed to parse token info: {}", e))?;
+
+    if !info.error.is_empty() {
+        return Err(format!("invalid token: {}", info.error));
+    }
+
+    // Verify audience matches our client ID (if configured)
+    if !client_id.is_empty() && info.aud != client_id {
+        return Err("token audience mismatch".into());
+    }
+
+    Ok(info)
+}
+
+/// Extract and verify Bearer token from Authorization header.
+async fn require_auth(
+    headers: &axum::http::HeaderMap,
+    client_id: &str,
+) -> Result<GoogleTokenInfo, Response> {
+    let auth_header = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+
+    let token = auth_header.strip_prefix("Bearer ").unwrap_or("");
+
+    if token.is_empty() {
+        return Err(error_response(StatusCode::UNAUTHORIZED, "missing authorization token"));
+    }
+
+    verify_google_token(token, client_id)
+        .await
+        .map_err(|e| error_response(StatusCode::UNAUTHORIZED, e))
 }
 
 // ── Handlers ────────────────────────────────────────────────────────
@@ -179,7 +272,7 @@ async fn handle_upload(
     }
 
     // Parse the multipart form
-    let mut image_data: Option<(Vec<u8>, String)> = None; // (bytes, field_name)
+    let mut image_data: Option<(Vec<u8>, String)> = None;
 
     while let Ok(Some(field)) = multipart.next_field().await {
         let name = field.name().unwrap_or("").to_string();
@@ -253,7 +346,10 @@ async fn handle_upload(
     Json(UploadResponse { url, key }).into_response()
 }
 
-async fn handle_serve(State(state): State<Arc<AppState>>, Path(key): Path<String>) -> Response {
+async fn handle_serve(
+    State(state): State<Arc<AppState>>,
+    Path(key): Path<String>,
+) -> Response {
     // Security: reject paths with slashes or empty keys
     if key.is_empty() || key.contains('/') || key.contains('\\') || key == "api" {
         return error_response(StatusCode::NOT_FOUND, "not found");
@@ -282,6 +378,139 @@ async fn handle_serve(State(state): State<Arc<AppState>>, Path(key): Path<String
     error_response(StatusCode::NOT_FOUND, "not found")
 }
 
+// ── Gallery API ─────────────────────────────────────────────────────
+
+async fn handle_gallery(
+    State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
+) -> Response {
+    // Require authentication
+    match require_auth(&headers, &state.config.google_client_id).await {
+        Ok(_) => {} // authenticated
+        Err(resp) => return resp,
+    }
+
+    let mut images: Vec<GalleryItem> = Vec::new();
+
+    let mut entries = match fs::read_dir(&state.config.storage_dir).await {
+        Ok(e) => e,
+        Err(e) => {
+            tracing::error!("Failed to read storage dir: {}", e);
+            return error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "failed to read gallery",
+            );
+        }
+    };
+
+    while let Ok(Some(entry)) = entries.next_entry().await {
+        let path = entry.path();
+
+        // Only process files, skip directories
+        if !path.is_file() {
+            continue;
+        }
+
+        let filename = match path.file_name().and_then(|n| n.to_str()) {
+            Some(f) => f.to_string(),
+            None => continue,
+        };
+
+        // Extract key from filename: "abc123.png" -> key="abc123", ext=".png"
+        let (key, ext) = match filename.rfind('.') {
+            Some(dot) => (filename[..dot].to_string(), filename[dot..].to_string()),
+            None => continue,
+        };
+
+        // Only include allowed image types
+        let mime_type = match ext.as_str() {
+            ".png" => "image/png",
+            ".jpg" | ".jpeg" => "image/jpeg",
+            ".webp" => "image/webp",
+            _ => continue,
+        };
+
+        // Get file metadata
+        let metadata = match fs::metadata(&path).await {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+
+        let size_bytes = metadata.len();
+        let uploaded_at: String = metadata
+            .modified()
+            .ok()
+            .and_then(|t| {
+                t.duration_since(std::time::UNIX_EPOCH)
+                    .ok()
+                    .and_then(|d| {
+                        DateTime::<Utc>::from_timestamp(d.as_secs() as i64, d.subsec_nanos())
+                            .map(|dt| dt.to_rfc3339())
+                    })
+            })
+            .unwrap_or_else(|| "unknown".to_string());
+
+        images.push(GalleryItem {
+            key: key.clone(),
+            url: format!("{}/{}", state.config.base_url, key),
+            filename,
+            mime_type: mime_type.to_string(),
+            size_bytes,
+            uploaded_at,
+        });
+    }
+
+    // Sort by upload time descending (newest first)
+    images.sort_by(|a, b| b.uploaded_at.cmp(&a.uploaded_at));
+
+    tracing::info!("Gallery: returning {} images", images.len());
+
+    Json(GalleryResponse { images }).into_response()
+}
+
+async fn handle_delete(
+    State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
+    Path(key): Path<String>,
+) -> Response {
+    // Require authentication
+    match require_auth(&headers, &state.config.google_client_id).await {
+        Ok(_) => {}
+        Err(resp) => return resp,
+    }
+
+    // Security: reject paths with slashes
+    if key.is_empty() || key.contains('/') || key.contains('\\') {
+        return error_response(StatusCode::NOT_FOUND, "not found");
+    }
+
+    // Try to delete the file with any known extension
+    let mut deleted = false;
+    for (_mime, ext) in ALLOWED_EXTENSIONS {
+        let file_path = state.config.storage_dir.join(format!("{}{}", key, ext));
+        match fs::remove_file(&file_path).await {
+            Ok(()) => {
+                tracing::info!("Deleted: {}{}", key, ext);
+                deleted = true;
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(e) => {
+                tracing::error!("Failed to delete {}{}: {}", key, ext, e);
+                return error_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "failed to delete image",
+                );
+            }
+        }
+    }
+
+    if deleted {
+        Json(serde_json::json!({ "deleted": true })).into_response()
+    } else {
+        error_response(StatusCode::NOT_FOUND, "image not found")
+    }
+}
+
 // ── Main ────────────────────────────────────────────────────────────
 
 #[tokio::main]
@@ -307,7 +536,7 @@ async fn main() {
 
     let state = Arc::new(AppState {
         config: config.clone(),
-        limiter: Mutex::new(RateLimiter::new(10, 60)), // 10 requests per 60s per IP
+        limiter: Mutex::new(RateLimiter::new(10, 60)),
     });
 
     // Spawn a cleanup task for the rate limiter
@@ -315,28 +544,69 @@ async fn main() {
         let state = state.clone();
         tokio::spawn(async move {
             loop {
-                tokio::time::sleep(Duration::from_secs(300)).await; // Every 5 minutes
+                tokio::time::sleep(Duration::from_secs(300)).await;
                 let mut limiter = state.limiter.lock().await;
                 limiter.cleanup();
             }
         });
     }
 
+    // CORS — allow the gallery frontend origin(s)
+    // CORS_ORIGINS can be a comma-separated list of allowed origins.
+    // Falls back to the base_url origin, then to allowing any origin.
+    let cors_origins: Vec<String> = std::env::var("CORS_ORIGINS")
+        .ok()
+        .map(|s| s.split(',').map(|o| o.trim().to_string()).collect())
+        .unwrap_or_default();
+
+    let allowed_origin: AllowOrigin = if !cors_origins.is_empty() {
+        let origins: Vec<axum::http::HeaderValue> = cors_origins
+            .iter()
+            .filter_map(|o| o.parse::<axum::http::HeaderValue>().ok())
+            .collect();
+        if origins.is_empty() {
+            AllowOrigin::any()
+        } else {
+            AllowOrigin::list(origins)
+        }
+    } else if let Ok(origin) = config.base_url.parse::<axum::http::HeaderValue>() {
+        AllowOrigin::exact(origin)
+    } else {
+        AllowOrigin::any()
+    };
+
+    let cors = CorsLayer::new()
+        .allow_origin(allowed_origin)
+        .allow_methods([Method::GET, Method::POST, Method::DELETE, Method::OPTIONS])
+        .allow_headers([
+            header::AUTHORIZATION,
+            header::CONTENT_TYPE,
+            header::ACCEPT,
+        ]);
+
     let app = Router::new()
         .route("/api/upload", post(handle_upload))
+        .route("/api/gallery", get(handle_gallery))
+        .route("/api/image/{key}", delete(handle_delete))
         .route("/{key}", get(handle_serve))
+        .layer(cors)
         .layer(RequestBodyLimitLayer::new(
             config.max_file_size + 1024 * 1024,
-        )) // +1MB for form overhead
-        .with_state(state);
+        ))
+        .with_state(state.clone());
 
     let addr = SocketAddr::from(([0, 0, 0, 0], config.port));
-    tracing::info!("Sin Shot upload server starting on http://{}", addr);
+    tracing::info!("Sin Shot server starting on http://{}", addr);
     tracing::info!(
         "Storage: {}, Max file size: {} MB",
         config.storage_dir.display(),
         config.max_file_size / (1024 * 1024)
     );
+    if !config.google_client_id.is_empty() {
+        tracing::info!("Google auth enabled (client ID configured)");
+    } else {
+        tracing::warn!("Google auth disabled — set GOOGLE_CLIENT_ID to enable gallery auth");
+    }
 
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
     axum::serve(
