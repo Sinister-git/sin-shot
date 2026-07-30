@@ -107,6 +107,7 @@ mod platform {
             id: i32,
             modifiers: u32,
             vk: u32,
+            result_tx: mpsc::Sender<Result<(), String>>,
         },
         Unregister {
             combo: String,
@@ -232,16 +233,6 @@ mod platform {
 
     // -- background thread -----------------------------------------------
 
-    /// Custom window message used to deliver commands to the hotkey thread.
-    const WM_HOTKEY_CMD: u32 = WM_USER + 1;
-    /// wParam values for WM_HOTKEY_CMD.
-    const CMD_REGISTER: usize = 1;
-    const CMD_UNREGISTER: usize = 2;
-
-    /// Pack a `ThreadCmd::Register` into lParam.
-    /// Layout: [combo_len: u32][id: i32][modifiers: u32][vk: u32][combo_bytes...]
-    /// Unused — simpler approach below via channels.
-
     fn hotkey_thread(rx: mpsc::Receiver<ThreadCmd>) {
         unsafe {
             let hinstance: HINSTANCE =
@@ -281,14 +272,6 @@ mod platform {
                 panic!("CreateWindowExA failed");
             }
 
-            // Store window handle in thread-local for the wndproc to use.
-            // We use a raw pointer stored as GWLP_USERDATA.
-            SetWindowLongPtrA(hwnd, GWLP_USERDATA, 0);
-
-            // When we need to store combo→id mappings for WM_HOTKEY, we
-            // build a reverse map in thread-local storage.
-            let mut id_to_combo: HashMap<i32, String> = HashMap::new();
-
             // Main message loop — also checks the channel for commands.
             loop {
                 // Pump Windows messages (non-blocking)
@@ -304,10 +287,11 @@ mod platform {
                 // Check for channel commands
                 match rx.try_recv() {
                     Ok(ThreadCmd::Register {
-                        combo,
+                        combo: _,
                         id,
                         modifiers,
                         vk,
+                        result_tx,
                     }) => {
                         let result = RegisterHotKey(
                             hwnd,
@@ -315,13 +299,12 @@ mod platform {
                             HOT_KEY_MODIFIERS(modifiers as u32),
                             u32::try_from(vk).unwrap_or(0),
                         );
-                        if result.is_ok() {
-                            id_to_combo.insert(id, combo);
-                        }
+                        let _ = result_tx.send(
+                            result.map_err(|e| format!("RegisterHotKey failed: {e:?}")),
+                        );
                     }
-                    Ok(ThreadCmd::Unregister { combo, id }) => {
+                    Ok(ThreadCmd::Unregister { combo: _, id }) => {
                         let _ = UnregisterHotKey(hwnd, id);
-                        id_to_combo.remove(&id);
                     }
                     Err(mpsc::TryRecvError::Disconnected) => break,
                     Err(mpsc::TryRecvError::Empty) => {
@@ -389,7 +372,8 @@ mod platform {
             id
         };
 
-        // Send command to hotkey thread
+        // Send command to hotkey thread and wait for result
+        let (result_tx, result_rx) = mpsc::channel();
         let tx = THREAD_TX.lock().unwrap();
         let tx = tx
             .as_ref()
@@ -400,8 +384,13 @@ mod platform {
             id,
             modifiers,
             vk,
+            result_tx,
         })
         .map_err(|e| format!("failed to send register command: {e}"))?;
+
+        result_rx
+            .recv()
+            .map_err(|e| format!("hotkey thread disconnected: {e}"))??;
 
         // Store combo→id mapping for unregistration
         COMBO_IDS
@@ -409,8 +398,6 @@ mod platform {
             .unwrap()
             .insert(combo.to_string(), id);
 
-        // Store the app handle for event emission from the wndproc.
-        // We use a global OnceLock.
         crate::hotkeys::store_app_handle(app);
 
         Ok(())

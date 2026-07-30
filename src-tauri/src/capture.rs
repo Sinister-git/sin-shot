@@ -76,8 +76,7 @@ pub async fn capture_area(
 mod platform {
     use super::CaptureResult;
     use base64::Engine as _;
-    use std::mem;
-    use windows::core::{Interface, GUID};
+    use windows::core::Interface;
     use windows::Win32::Graphics::Direct3D::D3D_DRIVER_TYPE_HARDWARE;
     use windows::Win32::Graphics::Direct3D11::{
         D3D11CreateDevice, ID3D11Device, ID3D11DeviceContext, ID3D11Resource,
@@ -88,13 +87,9 @@ mod platform {
     use windows::Win32::Graphics::Dxgi::{
         CreateDXGIFactory1, IDXGIFactory1, IDXGIAdapter1, IDXGIOutput,
         IDXGIOutput1, IDXGIOutputDuplication, IDXGIResource,
-        DXGI_ERROR_WAIT_TIMEOUT, DXGI_FORMAT_B8G8R8A8_UNORM,
-        DXGI_OUTDUPL_DESC, DXGI_OUTDUPL_FRAME_INFO,
+        DXGI_ERROR_WAIT_TIMEOUT, DXGI_OUTDUPL_FRAME_INFO,
     };
-    use windows::Win32::Graphics::Dxgi::Common::{
-        DXGI_ADAPTER_DESC1, DXGI_FORMAT, DXGI_MODE_DESC,
-        DXGI_OUTPUT_DESC,
-    };
+    use windows::Win32::Graphics::Dxgi::Common::DXGI_OUTPUT_DESC;
 
     // -- helpers ---------------------------------------------------------
 
@@ -171,7 +166,6 @@ mod platform {
     }
 
     /// Acquire one frame and copy its BGRA pixels into a Vec<u8>.
-    /// Returns `(width, height, bgra_bytes, stride)`.
     fn acquire_frame(
         dupl: &IDXGIOutputDuplication,
         device: &ID3D11Device,
@@ -192,67 +186,84 @@ mod platform {
 
             let resource = resource.ok_or("AcquireNextFrame returned null resource")?;
 
-            let tex: ID3D11Texture2D = resource
-                .cast()
-                .map_err(|e| format!("Cast resource to texture failed: {e}"))?;
+            let result = process_acquired_frame(device, context, &resource);
 
-            let mut tex_desc = D3D11_TEXTURE2D_DESC::default();
-            tex.GetDesc(&mut tex_desc);
-
-            let width = tex_desc.Width;
-            let height = tex_desc.Height;
-
-            // Create a staging texture for CPU read-back
-            let mut staging_desc = tex_desc;
-            staging_desc.Usage = windows::Win32::Graphics::Direct3D11::D3D11_USAGE_STAGING;
-            staging_desc.BindFlags = D3D11_BIND_FLAG(0);
-            staging_desc.CPUAccessFlags = windows::Win32::Graphics::Direct3D11::D3D11_CPU_ACCESS_READ;
-            staging_desc.MiscFlags = 0;
-
-            let staging_tex = {
-                let mut tex: Option<ID3D11Texture2D> = None;
-                device
-                    .CreateTexture2D(&staging_desc, None, Some(&mut tex))
-                    .map_err(|e| format!("CreateTexture2D (staging) failed: {e}"))?;
-                tex.ok_or("CreateTexture2D returned null")?
-            };
-
-            context.CopyResource(&staging_tex, &tex);
-
-            // Map the staging texture
-            let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
-            context
-                .Map(&staging_tex, 0, D3D11_MAP_READ, 0, Some(&mut mapped))
-                .map_err(|e| format!("Map failed: {e}"))?;
-
-            let row_pitch = mapped.RowPitch as usize;
-            let data_ptr = mapped.pData as *const u8;
-
-            // Copy row by row, respecting stride
-            let row_bytes = (width as usize) * 4;
-            let mut pixels = Vec::with_capacity((width * height * 4) as usize);
-
-            for row in 0..(height as usize) {
-                let src = data_ptr.add(row * row_pitch);
-                let row_slice = std::slice::from_raw_parts(src, row_bytes);
-                pixels.extend_from_slice(row_slice);
-            }
-
-            context.Unmap(&staging_tex, 0);
-
-            // Release frame
             dupl.ReleaseFrame().map_err(|e| format!("ReleaseFrame failed: {e}"))?;
 
-            // Drop staging_texture here so it is freed before dupl
-            drop(staging_tex);
-
-            Ok((width, height, pixels))
+            result
         }
+    }
+
+    /// Process a frame that has already been acquired via AcquireNextFrame.
+    /// Copies BGRA pixels from the acquired texture to a CPU-readable Vec<u8>.
+    unsafe fn process_acquired_frame(
+        device: &ID3D11Device,
+        context: &ID3D11DeviceContext,
+        resource: &IDXGIResource,
+    ) -> Result<(u32, u32, Vec<u8>), String> {
+        let tex: ID3D11Texture2D = resource
+            .cast()
+            .map_err(|e| format!("Cast resource to texture failed: {e}"))?;
+
+        let mut tex_desc = D3D11_TEXTURE2D_DESC::default();
+        tex.GetDesc(&mut tex_desc);
+
+        let width = tex_desc.Width;
+        let height = tex_desc.Height;
+
+        // Create a staging texture for CPU read-back
+        let mut staging_desc = tex_desc;
+        staging_desc.Usage = windows::Win32::Graphics::Direct3D11::D3D11_USAGE_STAGING;
+        staging_desc.BindFlags = D3D11_BIND_FLAG(0);
+        staging_desc.CPUAccessFlags = windows::Win32::Graphics::Direct3D11::D3D11_CPU_ACCESS_READ;
+        staging_desc.MiscFlags = 0;
+
+        let staging_tex = {
+            let mut tex: Option<ID3D11Texture2D> = None;
+            device
+                .CreateTexture2D(&staging_desc, None, Some(&mut tex))
+                .map_err(|e| format!("CreateTexture2D (staging) failed: {e}"))?;
+            tex.ok_or("CreateTexture2D returned null")?
+        };
+
+        context.CopyResource(&staging_tex, &tex);
+
+        // Map the staging texture
+        let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
+        context
+            .Map(&staging_tex, 0, D3D11_MAP_READ, 0, Some(&mut mapped))
+            .map_err(|e| format!("Map failed: {e}"))?;
+
+        let row_pitch = mapped.RowPitch as usize;
+        let data_ptr = mapped.pData as *const u8;
+
+        // Copy row by row, respecting stride
+        let row_bytes = (width as usize) * 4;
+        let mut pixels = Vec::with_capacity((width * height * 4) as usize);
+
+        for row in 0..(height as usize) {
+            let src = data_ptr.add(row * row_pitch);
+            let row_slice = std::slice::from_raw_parts(src, row_bytes);
+            pixels.extend_from_slice(row_slice);
+        }
+
+        context.Unmap(&staging_tex, 0);
+
+        Ok((width, height, pixels))
     }
 
     // -- public entry points ---------------------------------------------
 
+    /// Capture the entire monitor, returning RGBA pixels as a pre-encoded
+    /// CaptureResult.
     pub fn capture_monitor(monitor_index: u32) -> Result<CaptureResult, String> {
+        let (width, height, rgba) = capture_monitor_rgba(monitor_index)?;
+        let data = base64::engine::general_purpose::STANDARD.encode(&rgba);
+        Ok(CaptureResult { width, height, data })
+    }
+
+    /// Internal helper: capture the full monitor and return raw RGBA pixels.
+    fn capture_monitor_rgba(monitor_index: u32) -> Result<(u32, u32, Vec<u8>), String> {
         unsafe {
             let factory: IDXGIFactory1 =
                 CreateDXGIFactory1().map_err(|e| format!("CreateDXGIFactory1 failed: {e}"))?;
@@ -264,14 +275,7 @@ mod platform {
             let (width, height, bgra) =
                 acquire_frame(&dupl, &device, &context)?;
 
-            let rgba = bgra_to_rgba(&bgra);
-            let data = base64::engine::general_purpose::STANDARD.encode(&rgba);
-
-            Ok(CaptureResult {
-                width,
-                height,
-                data,
-            })
+            Ok((width, height, bgra_to_rgba(&bgra)))
         }
     }
 
@@ -282,26 +286,20 @@ mod platform {
         w: u32,
         h: u32,
     ) -> Result<CaptureResult, String> {
-        let full = capture_monitor(monitor_index)?;
+        let (full_width, full_height, rgba) = capture_monitor_rgba(monitor_index)?;
 
         let rx = x.max(0) as u32;
         let ry = y.max(0) as u32;
-        let rw = w.min(full.width.saturating_sub(rx));
-        let rh = h.min(full.height.saturating_sub(ry));
+        let rw = w.min(full_width.saturating_sub(rx));
+        let rh = h.min(full_height.saturating_sub(ry));
 
         if rw == 0 || rh == 0 {
             return Err("capture rectangle is empty or out of bounds".into());
         }
 
-        let rgba = base64::engine::general_purpose::STANDARD
-            .decode(&full.data)
-            .map_err(|e| format!("base64 decode failed: {e}"))?;
-
-        // Crop from full image (row-major RGBA)
         let mut cropped = Vec::with_capacity((rw * rh * 4) as usize);
-        let full_row_bytes = (full.width * 4) as usize;
         for row in ry..(ry + rh) {
-            let start = (row * full.width * 4 + rx * 4) as usize;
+            let start = (row * full_width * 4 + rx * 4) as usize;
             let end = start + (rw * 4) as usize;
             cropped.extend_from_slice(&rgba[start..end]);
         }

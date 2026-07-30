@@ -6,6 +6,7 @@ mod upload;
 use capture::CaptureState;
 use clipboard::ClipboardState;
 use hotkeys::HotkeyState;
+use tauri::Manager;
 use upload::UploadState;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -28,8 +29,19 @@ pub fn run() {
 
             // We cannot call async Tauri commands from setup directly, so we
             // invoke the platform register helpers directly with the AppHandle.
-            let _ = hotkeys::register_hotkey_platform("Ctrl+Shift+1", handle.clone());
-            let _ = hotkeys::register_hotkey_platform("Ctrl+Shift+2", handle);
+            let r1 = hotkeys::register_hotkey_platform("Ctrl+Shift+1", handle.clone());
+            let r2 = hotkeys::register_hotkey_platform("Ctrl+Shift+2", handle);
+
+            // Sync HotkeyState so the frontend can discover defaults
+            let state = app.state::<std::sync::Mutex<HotkeyState>>();
+            if let Ok(mut guard) = state.lock() {
+                if r1.is_ok() {
+                    guard.hotkeys_registered.push("Ctrl+Shift+1".to_string());
+                }
+                if r2.is_ok() {
+                    guard.hotkeys_registered.push("Ctrl+Shift+2".to_string());
+                }
+            }
 
             Ok(())
         })
