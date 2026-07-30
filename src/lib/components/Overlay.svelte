@@ -413,21 +413,21 @@
         imageDataBase64: pngBase64,
         filename: `sin-shot-${Date.now()}.png`,
       });
-      uploadUrl = url;
+      // Convert to short URL: https://sinister.ovh/{key} → https://sinister.ovh/x/{key}
+      const shortUrl = url.replace(/\/([^/]+)$/, '/x/$1');
+      uploadUrl = shortUrl;
 
-      // Copy the URL to clipboard
+      // Copy the short URL to clipboard via the Tauri clipboard module
       try {
-        if (navigator.clipboard && navigator.clipboard.writeText) {
-          await navigator.clipboard.writeText(url);
-        }
+        await invoke('copy_text_to_clipboard', { text: shortUrl });
       } catch {
         // best-effort URL copy
       }
 
-      // Show result briefly then finish
-      lastUploadResult = url;
-      // Keep visible for 2 seconds so the user sees the URL, then finish
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      // Show toast briefly then finish
+      lastUploadResult = shortUrl;
+      // Keep visible for 3 seconds so the user sees the toast, then finish
+      await new Promise(resolve => setTimeout(resolve, 3000));
     } catch (err) {
       console.error('upload failed:', err);
     }
@@ -580,12 +580,14 @@
         uploading={uploading}
       />
 
-      <!-- Upload result notification -->
+      <!-- Upload result toast -->
       {#if uploadUrl}
-        <div class="upload-result">
-          <span class="upload-result-icon">☁️</span>
-          <span class="upload-result-text">Uploaded!</span>
-          <span class="upload-result-url">{uploadUrl}</span>
+        <div class="upload-toast">
+          <span class="toast-icon">📋</span>
+          <div class="toast-body">
+            <span class="toast-title">URL copied!</span>
+            <span class="toast-url">{uploadUrl}</span>
+          </div>
         </div>
       {/if}
     </div>
@@ -780,39 +782,52 @@
     box-shadow: 0 0 40px rgba(0, 0, 0, 0.6);
   }
 
-  .upload-result {
+  .upload-toast {
     position: absolute;
     top: -52px;
     left: 50%;
     transform: translateX(-50%);
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 10px;
     background: rgba(40, 42, 54, 0.95);
     border: 1px solid #50c878;
     border-radius: 8px;
-    padding: 8px 16px;
+    padding: 10px 18px;
     white-space: nowrap;
     backdrop-filter: blur(8px);
     z-index: 20;
+    animation: toast-in 0.25s ease-out;
   }
 
-  .upload-result-icon {
-    font-size: 18px;
+  @keyframes toast-in {
+    from { opacity: 0; transform: translateX(-50%) translateY(6px); }
+    to   { opacity: 1; transform: translateX(-50%) translateY(0); }
   }
 
-  .upload-result-text {
+  .toast-icon {
+    font-size: 20px;
+    line-height: 1;
+  }
+
+  .toast-body {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .toast-title {
     font-family: 'Segoe UI', system-ui, sans-serif;
     font-size: 13px;
     font-weight: 600;
     color: #50c878;
   }
 
-  .upload-result-url {
+  .toast-url {
     font-family: 'Cascadia Code', 'Fira Code', monospace;
     font-size: 11px;
     color: #a78bfa;
-    max-width: 300px;
+    max-width: 320px;
     overflow: hidden;
     text-overflow: ellipsis;
   }
