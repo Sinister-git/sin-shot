@@ -607,6 +607,7 @@ async fn main() {
         .route("/api/gallery", get(handle_gallery))
         .route("/api/image/{key}", delete(handle_delete))
         .route("/{key}", get(handle_serve))
+        .route("/x/{key}", get(handle_serve))
         .layer(cors)
         .layer(RequestBodyLimitLayer::new(
             config.max_file_size + 1024 * 1024,
