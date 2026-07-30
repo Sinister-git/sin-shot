@@ -1,10 +1,10 @@
-/// Clipboard read/write module.
-///
-/// Stub — will read and write image data to the Windows clipboard
-/// so captured screenshots are immediately available for paste.
+//! Clipboard read/write module.
+//!
+//! Stub — will read and write image data to the Windows clipboard
+//! so captured screenshots are immediately available for paste.
 
-use tauri::State;
 use std::sync::Mutex;
+use tauri::State;
 
 pub struct ClipboardState {
     pub last_clipboard_content: Option<String>,

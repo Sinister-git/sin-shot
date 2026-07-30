@@ -1,10 +1,10 @@
-/// DXGI/DirectX screen capture module.
-///
-/// Captures entire monitors or rectangular areas using the Windows
-/// Desktop Duplication API (DXGI). Returns RGBA pixel data as base64.
-///
-/// On non-Windows platforms, commands return an error — the frontend
-/// already handles this by checking `__TAURI_INTERNALS__`.
+//! DXGI/DirectX screen capture module.
+//!
+//! Captures entire monitors or rectangular areas using the Windows
+//! Desktop Duplication API (DXGI). Returns RGBA pixel data as base64.
+//!
+//! On non-Windows platforms, commands return an error — the frontend
+//! already handles this by checking `__TAURI_INTERNALS__`.
 
 use serde::Serialize;
 use std::sync::Mutex;
@@ -79,17 +79,15 @@ mod platform {
     use windows::core::Interface;
     use windows::Win32::Graphics::Direct3D::D3D_DRIVER_TYPE_HARDWARE;
     use windows::Win32::Graphics::Direct3D11::{
-        D3D11CreateDevice, ID3D11Device, ID3D11DeviceContext, ID3D11Resource,
-        ID3D11Texture2D, D3D11_BIND_FLAG, D3D11_CREATE_DEVICE_BGRA_SUPPORT,
-        D3D11_MAP_READ, D3D11_MAPPED_SUBRESOURCE, D3D11_SDK_VERSION,
-        D3D11_TEXTURE2D_DESC,
-    };
-    use windows::Win32::Graphics::Dxgi::{
-        CreateDXGIFactory1, IDXGIFactory1, IDXGIAdapter1, IDXGIOutput,
-        IDXGIOutput1, IDXGIOutputDuplication, IDXGIResource,
-        DXGI_ERROR_WAIT_TIMEOUT, DXGI_OUTDUPL_FRAME_INFO,
+        D3D11CreateDevice, ID3D11Device, ID3D11DeviceContext, ID3D11Resource, ID3D11Texture2D,
+        D3D11_BIND_FLAG, D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_MAPPED_SUBRESOURCE,
+        D3D11_MAP_READ, D3D11_SDK_VERSION, D3D11_TEXTURE2D_DESC,
     };
     use windows::Win32::Graphics::Dxgi::Common::DXGI_OUTPUT_DESC;
+    use windows::Win32::Graphics::Dxgi::{
+        CreateDXGIFactory1, IDXGIAdapter1, IDXGIFactory1, IDXGIOutput, IDXGIOutput1,
+        IDXGIOutputDuplication, IDXGIResource, DXGI_ERROR_WAIT_TIMEOUT, DXGI_OUTDUPL_FRAME_INFO,
+    };
 
     // -- helpers ---------------------------------------------------------
 
@@ -114,14 +112,14 @@ mod platform {
 
         unsafe {
             D3D11CreateDevice(
-                None,                                  // default adapter
+                None, // default adapter
                 D3D_DRIVER_TYPE_HARDWARE,
-                None,                                  // no software module
+                None, // no software module
                 flags,
                 &feature_levels,
                 D3D11_SDK_VERSION as u32,
                 Some(&mut device),
-                None,                                  // feature level out
+                None, // feature level out
                 Some(&mut context),
             )
         }
@@ -133,7 +131,10 @@ mod platform {
     }
 
     /// Get the output (monitor) at `monitor_index`.
-    fn get_output(factory: &IDXGIFactory1, monitor_index: u32) -> Result<(IDXGIOutput1, DXGI_OUTPUT_DESC), String> {
+    fn get_output(
+        factory: &IDXGIFactory1,
+        monitor_index: u32,
+    ) -> Result<(IDXGIOutput1, DXGI_OUTPUT_DESC), String> {
         unsafe {
             let adapter: IDXGIAdapter1 = factory
                 .EnumAdapters1(monitor_index)
@@ -143,7 +144,9 @@ mod platform {
                 .EnumOutputs(0)
                 .map_err(|e| format!("EnumOutputs failed: {e}"))?;
 
-            let desc = output.GetDesc().map_err(|e| format!("GetDesc failed: {e}"))?;
+            let desc = output
+                .GetDesc()
+                .map_err(|e| format!("GetDesc failed: {e}"))?;
 
             let output1: IDXGIOutput1 = output
                 .cast()
@@ -178,7 +181,9 @@ mod platform {
             loop {
                 let hr = dupl.AcquireNextFrame(1000, &mut info, &mut resource);
                 if hr == DXGI_ERROR_WAIT_TIMEOUT {
-                    return Err("timeout acquiring next frame — screen may be locked or no updates".into());
+                    return Err(
+                        "timeout acquiring next frame — screen may be locked or no updates".into(),
+                    );
                 }
                 hr.map_err(|e| format!("AcquireNextFrame failed: {e}"))?;
                 break;
@@ -188,7 +193,8 @@ mod platform {
 
             let result = process_acquired_frame(device, context, &resource);
 
-            dupl.ReleaseFrame().map_err(|e| format!("ReleaseFrame failed: {e}"))?;
+            dupl.ReleaseFrame()
+                .map_err(|e| format!("ReleaseFrame failed: {e}"))?;
 
             result
         }
@@ -259,7 +265,11 @@ mod platform {
     pub fn capture_monitor(monitor_index: u32) -> Result<CaptureResult, String> {
         let (width, height, rgba) = capture_monitor_rgba(monitor_index)?;
         let data = base64::engine::general_purpose::STANDARD.encode(&rgba);
-        Ok(CaptureResult { width, height, data })
+        Ok(CaptureResult {
+            width,
+            height,
+            data,
+        })
     }
 
     /// Internal helper: capture the full monitor and return raw RGBA pixels.
@@ -272,8 +282,7 @@ mod platform {
             let (device, context) = create_device()?;
             let dupl = duplicate_output(&output1, &device)?;
 
-            let (width, height, bgra) =
-                acquire_frame(&dupl, &device, &context)?;
+            let (width, height, bgra) = acquire_frame(&dupl, &device, &context)?;
 
             Ok((width, height, bgra_to_rgba(&bgra)))
         }
@@ -334,5 +343,57 @@ mod platform {
         _h: u32,
     ) -> Result<CaptureResult, String> {
         Err("screen capture is only supported on Windows".into())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use base64::Engine as _;
+
+    #[test]
+    fn capture_result_serializes_to_json() {
+        let result = CaptureResult {
+            width: 1920,
+            height: 1080,
+            data: "iVBORw0KGgo".to_string(),
+        };
+        let json = serde_json::to_string(&result).expect("serialize");
+        assert!(json.contains("\"width\":1920"));
+        assert!(json.contains("\"height\":1080"));
+        assert!(json.contains("iVBORw0KGgo"));
+    }
+
+    #[test]
+    fn capture_result_roundtrip_base64() {
+        // Verify that base64 encoding used in the capture pipeline
+        // produces decodable output (tests the base64 dependency is wired correctly).
+        let pixels = vec![0u8; 1920 * 1080 * 4];
+        let data = base64::engine::general_purpose::STANDARD.encode(&pixels);
+        let decoded = base64::engine::general_purpose::STANDARD
+            .decode(&data)
+            .expect("decode");
+        assert_eq!(decoded.len(), pixels.len());
+    }
+
+    #[test]
+    fn capture_state_starts_uninitialized() {
+        let state = CaptureState::new();
+        assert!(!state.initialized);
+    }
+
+    #[test]
+    fn non_windows_capture_stubs_return_error() {
+        let r = platform::capture_monitor(0);
+        assert!(r.is_err());
+        assert!(r.unwrap_err().contains("Windows"));
+
+        let r = platform::capture_rect(0, 0, 0, 100, 100);
+        assert!(r.is_err());
+        assert!(r.unwrap_err().contains("Windows"));
     }
 }

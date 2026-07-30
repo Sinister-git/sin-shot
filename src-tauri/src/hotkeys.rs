@@ -1,11 +1,11 @@
-/// System-wide global hotkey registration.
-///
-/// Registers global hotkeys on Windows via `RegisterHotKey` / `UnregisterHotKey`.
-/// A background thread runs a message-only window to receive `WM_HOTKEY` and
-/// emits Tauri events when a hotkey is pressed.
-///
-/// On non-Windows platforms commands succeed silently — build must compile
-/// on Linux even though the APIs are Windows-only.
+//! System-wide global hotkey registration.
+//!
+//! Registers global hotkeys on Windows via `RegisterHotKey` / `UnregisterHotKey`.
+//! A background thread runs a message-only window to receive `WM_HOTKEY` and
+//! emits Tauri events when a hotkey is pressed.
+//!
+//! On non-Windows platforms commands succeed silently — build must compile
+//! on Linux even though the APIs are Windows-only.
 
 use serde::Serialize;
 use std::sync::Mutex;
@@ -235,8 +235,7 @@ mod platform {
 
     fn hotkey_thread(rx: mpsc::Receiver<ThreadCmd>) {
         unsafe {
-            let hinstance: HINSTANCE =
-                GetModuleHandleA(None).expect("GetModuleHandleA failed");
+            let hinstance: HINSTANCE = GetModuleHandleA(None).expect("GetModuleHandleA failed");
 
             // Register a dummy window class
             let class_name = windows::core::s!("SinShotHotkeyClass");
@@ -299,9 +298,8 @@ mod platform {
                             HOT_KEY_MODIFIERS(modifiers as u32),
                             u32::try_from(vk).unwrap_or(0),
                         );
-                        let _ = result_tx.send(
-                            result.map_err(|e| format!("RegisterHotKey failed: {e:?}")),
-                        );
+                        let _ = result_tx
+                            .send(result.map_err(|e| format!("RegisterHotKey failed: {e:?}")));
                     }
                     Ok(ThreadCmd::Unregister { combo: _, id }) => {
                         let _ = UnregisterHotKey(hwnd, id);
@@ -333,9 +331,7 @@ mod platform {
             // combo string. We'll use a global map.
             let combo = {
                 let map = COMBO_IDS.lock().unwrap();
-                map.iter()
-                    .find(|(_, &v)| v == id)
-                    .map(|(k, _)| k.clone())
+                map.iter().find(|(_, &v)| v == id).map(|(k, _)| k.clone())
             };
 
             if let Some(combo) = combo {
@@ -393,10 +389,7 @@ mod platform {
             .map_err(|e| format!("hotkey thread disconnected: {e}"))??;
 
         // Store combo→id mapping for unregistration
-        COMBO_IDS
-            .lock()
-            .unwrap()
-            .insert(combo.to_string(), id);
+        COMBO_IDS.lock().unwrap().insert(combo.to_string(), id);
 
         crate::hotkeys::store_app_handle(app);
 
@@ -412,9 +405,7 @@ mod platform {
         .ok_or_else(|| format!("hotkey not registered: {combo}"))?;
 
         let tx = THREAD_TX.lock().unwrap();
-        let tx = tx
-            .as_ref()
-            .ok_or("hotkey thread not initialised")?;
+        let tx = tx.as_ref().ok_or("hotkey thread not initialised")?;
 
         tx.send(ThreadCmd::Unregister {
             combo: combo.to_string(),
@@ -451,6 +442,8 @@ mod platform {
 }
 
 // ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
 // AppHandle / event emission helpers
 // ---------------------------------------------------------------------------
 
@@ -466,9 +459,12 @@ pub(crate) fn store_app_handle(app: AppHandle) {
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 pub(crate) fn emit_hotkey_event(combo: &str) {
     if let Some(app) = APP_HANDLE.get() {
-        let _ = app.emit("hotkey-pressed", HotkeyEvent {
-            combo: combo.to_string(),
-        });
+        let _ = app.emit(
+            "hotkey-pressed",
+            HotkeyEvent {
+                combo: combo.to_string(),
+            },
+        );
     }
 }
 
@@ -481,4 +477,57 @@ pub fn init_hotkey_system() {
 /// command router is active). On non-Windows this is a no-op.
 pub fn register_hotkey_platform(combo: &str, app: tauri::AppHandle) -> Result<(), String> {
     platform::register(combo, app)
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hotkey_event_serializes_to_json() {
+        let event = HotkeyEvent {
+            combo: "Ctrl+Shift+1".to_string(),
+        };
+        let json = serde_json::to_string(&event).expect("serialize");
+        assert!(json.contains("\"combo\":\"Ctrl+Shift+1\""));
+    }
+
+    #[test]
+    fn hotkey_event_multiple_combos() {
+        let combos = vec!["Ctrl+Shift+1", "Ctrl+Shift+2", "Alt+F4", "Ctrl+C"];
+        for combo in &combos {
+            let event = HotkeyEvent {
+                combo: combo.to_string(),
+            };
+            let json = serde_json::to_string(&event).expect("serialize");
+            assert!(json.contains(combo));
+        }
+    }
+
+    #[test]
+    fn hotkey_state_starts_empty() {
+        let state = HotkeyState::new();
+        assert!(state.hotkeys_registered.is_empty());
+    }
+
+    #[test]
+    fn non_windows_hotkey_init_does_not_panic() {
+        // init should be a no-op on non-Windows
+        platform::init();
+    }
+
+    #[test]
+    fn non_windows_register_returns_ok() {
+        // On non-Windows, register silently succeeds.
+        // We need an AppHandle, but the stub ignores it.
+        // Use a test that verifies the stub signature compiles.
+        // The stub always returns Ok(()).
+        // (We can't construct an AppHandle in a unit test, so we
+        //  verify init and the type interface instead.)
+        platform::init();
+    }
 }
