@@ -175,6 +175,11 @@
     } catch (e) {
       console.error('Failed to update hotkey:', e);
       entry.combo = oldCombo;
+      if (entry.id === 'capture_full') {
+        settings.hotkey_full = oldCombo;
+      } else if (entry.id === 'capture_area') {
+        settings.hotkey_area = oldCombo;
+      }
       showToast('Failed to update hotkey');
     }
   }
