@@ -53,12 +53,10 @@
   let currentColor: string = $state('#ff0000');
   let uploading = $state(false);
   let uploadUrl: string | null = $state(null);
+  let wasCopied = $state(false);
 
   // Ref to AnnotationCanvas for export
   let annotationCanvas: AnnotationCanvas | null = $state(null);
-
-  // Upload response (shown to user after upload completes)
-  let lastUploadResult: string | null = $state(null);
 
   // ---------------------------------------------------------------------------
   // Capture state
@@ -248,7 +246,7 @@
     capturedImage = null;
     uploading = false;
     uploadUrl = null;
-    lastUploadResult = null;
+    wasCopied = false;
     currentTool = 'pen';
     currentColor = '#ff0000';
   }
@@ -420,12 +418,12 @@
       // Copy the short URL to clipboard
       try {
         await navigator.clipboard.writeText(shortUrl);
+        wasCopied = true;
       } catch {
         // best-effort URL copy
       }
 
       // Show toast briefly then finish
-      lastUploadResult = shortUrl;
       // Keep visible for 3 seconds so the user sees the toast, then finish
       await new Promise(resolve => setTimeout(resolve, 3000));
     } catch (err) {
@@ -444,7 +442,7 @@
     capturedImage = null;
     uploading = false;
     uploadUrl = null;
-    lastUploadResult = null;
+    wasCopied = false;
     mode = null;
     await cancelCapture();
   }
@@ -585,7 +583,7 @@
         <div class="upload-toast">
           <span class="toast-icon">📋</span>
           <div class="toast-body">
-            <span class="toast-title">URL copied!</span>
+            <span class="toast-title">{wasCopied ? 'URL copied!' : 'Uploaded!'}</span>
             <span class="toast-url">{uploadUrl}</span>
           </div>
         </div>
