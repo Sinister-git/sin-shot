@@ -13,6 +13,47 @@ import ActionBar from './ActionBar.svelte';
 import type { Tool, AnnotationSnapshot } from '$lib/types';
 
 // ---------------------------------------------------------------------------
+// Pure logic — keyboard tool-switching (extracted from Overlay.svelte)
+// ---------------------------------------------------------------------------
+
+/**
+ * Maps a single-character key to its corresponding annotation tool.
+ * Returns null if the key does not match any tool shortcut.
+ */
+function keyToTool(key: string): Tool | null {
+  const toolMap: Record<string, Tool> = {
+    p: 'pen',
+    a: 'arrow',
+    r: 'rectangle',
+    t: 'text',
+    b: 'blur',
+    e: 'eraser',
+  };
+  return toolMap[key.toLowerCase()] ?? null;
+}
+
+/**
+ * Returns true when a keyboard event should be treated as a tool-switch
+ * shortcut in the annotation editor.  Rejects:
+ *  - modifier keys (Ctrl, Alt, Meta)
+ *  - any flow state other than "annotating"
+ *  - events dispatched while an INPUT or TEXTAREA is focused
+ */
+function shouldSwitchTool(
+  flowState: string,
+  key: string,
+  ctrlKey: boolean,
+  altKey: boolean,
+  metaKey: boolean,
+  activeTagName: string | undefined,
+): boolean {
+  if (flowState !== 'annotating') return false;
+  if (ctrlKey || altKey || metaKey) return false;
+  if (activeTagName === 'INPUT' || activeTagName === 'TEXTAREA') return false;
+  return keyToTool(key) !== null;
+}
+
+// ---------------------------------------------------------------------------
 // Pure logic from AnnotationCanvas.svelte — undo/redo stack
 // ---------------------------------------------------------------------------
 
@@ -351,5 +392,194 @@ describe('ActionBar component', () => {
     });
     const uploadBtn = screen.getByTitle('Upload to sinister.ovh') as HTMLButtonElement;
     expect(uploadBtn.disabled).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests — Keyboard tool-switching logic (pure functions)
+// ---------------------------------------------------------------------------
+
+describe('keyToTool', () => {
+  it('maps each shortcut key to the correct tool', () => {
+    expect(keyToTool('p')).toBe('pen');
+    expect(keyToTool('a')).toBe('arrow');
+    expect(keyToTool('r')).toBe('rectangle');
+    expect(keyToTool('t')).toBe('text');
+    expect(keyToTool('b')).toBe('blur');
+    expect(keyToTool('e')).toBe('eraser');
+  });
+
+  it('is case-insensitive', () => {
+    expect(keyToTool('P')).toBe('pen');
+    expect(keyToTool('A')).toBe('arrow');
+    expect(keyToTool('R')).toBe('rectangle');
+    expect(keyToTool('T')).toBe('text');
+    expect(keyToTool('B')).toBe('blur');
+    expect(keyToTool('E')).toBe('eraser');
+  });
+
+  it('returns null for non-tool keys', () => {
+    expect(keyToTool('x')).toBeNull();
+    expect(keyToTool('1')).toBeNull();
+    expect(keyToTool(' ')).toBeNull();
+    expect(keyToTool('Escape')).toBeNull();
+    expect(keyToTool('Enter')).toBeNull();
+    expect(keyToTool('z')).toBeNull();
+    expect(keyToTool('y')).toBeNull();
+  });
+});
+
+describe('shouldSwitchTool', () => {
+  // Happy path — annotating, no modifiers, no input focus, valid tool key
+  it('returns true for valid tool keys in annotation mode', () => {
+    expect(shouldSwitchTool('annotating', 'p', false, false, false, undefined)).toBe(true);
+    expect(shouldSwitchTool('annotating', 'a', false, false, false, undefined)).toBe(true);
+    expect(shouldSwitchTool('annotating', 'r', false, false, false, 'BODY')).toBe(true);
+    expect(shouldSwitchTool('annotating', 'T', false, false, false, 'DIV')).toBe(true);
+  });
+
+  it('returns false for non-tool keys in annotation mode', () => {
+    expect(shouldSwitchTool('annotating', 'x', false, false, false, undefined)).toBe(false);
+    expect(shouldSwitchTool('annotating', 'Escape', false, false, false, undefined)).toBe(false);
+    expect(shouldSwitchTool('annotating', 'z', false, false, false, undefined)).toBe(false);
+  });
+
+  // Flow state guard
+  it('returns false when flowState is idle', () => {
+    expect(shouldSwitchTool('idle', 'p', false, false, false, undefined)).toBe(false);
+    expect(shouldSwitchTool('idle', 'a', false, false, false, undefined)).toBe(false);
+  });
+
+  it('returns false when flowState is capturing', () => {
+    expect(shouldSwitchTool('capturing', 'p', false, false, false, undefined)).toBe(false);
+    expect(shouldSwitchTool('capturing', 'r', false, false, false, undefined)).toBe(false);
+  });
+
+  it('returns false when flowState is uploading', () => {
+    expect(shouldSwitchTool('uploading', 'p', false, false, false, undefined)).toBe(false);
+    expect(shouldSwitchTool('uploading', 'e', false, false, false, undefined)).toBe(false);
+  });
+
+  // Modifier guards
+  it('returns false when Ctrl key is held', () => {
+    expect(shouldSwitchTool('annotating', 'p', true, false, false, undefined)).toBe(false);
+    expect(shouldSwitchTool('annotating', 'a', true, false, false, undefined)).toBe(false);
+  });
+
+  it('returns false when Alt key is held', () => {
+    expect(shouldSwitchTool('annotating', 'p', false, true, false, undefined)).toBe(false);
+    expect(shouldSwitchTool('annotating', 't', false, true, false, undefined)).toBe(false);
+  });
+
+  it('returns false when Meta key is held', () => {
+    expect(shouldSwitchTool('annotating', 'p', false, false, true, undefined)).toBe(false);
+    expect(shouldSwitchTool('annotating', 'b', false, false, true, undefined)).toBe(false);
+  });
+
+  // Input-focus guard
+  it('returns false when an INPUT element is focused', () => {
+    expect(shouldSwitchTool('annotating', 'p', false, false, false, 'INPUT')).toBe(false);
+    expect(shouldSwitchTool('annotating', 'r', false, false, false, 'INPUT')).toBe(false);
+  });
+
+  it('returns false when a TEXTAREA element is focused', () => {
+    expect(shouldSwitchTool('annotating', 't', false, false, false, 'TEXTAREA')).toBe(false);
+    expect(shouldSwitchTool('annotating', 'e', false, false, false, 'TEXTAREA')).toBe(false);
+  });
+
+  // Undo/Redo keys — Ctrl+Z / Ctrl+Y must NOT switch tools even when Z/Y map to nothing
+  it('allows Ctrl+Z through (not a tool switch)', () => {
+    // Ctrl+Z should not be blocked — it's for undo
+    expect(shouldSwitchTool('annotating', 'z', true, false, false, undefined)).toBe(false);
+  });
+
+  it('allows Ctrl+Y through (not a tool switch)', () => {
+    expect(shouldSwitchTool('annotating', 'y', true, false, false, undefined)).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests — Toolbar keyboard flash prop
+// ---------------------------------------------------------------------------
+
+describe('Toolbar flash animation', () => {
+  it('applies the flash CSS class when flashTool matches the tool id', () => {
+    const { container } = render(Toolbar, {
+      activeTool: 'pen',
+      color: '#ff0000',
+      flashTool: 'arrow',
+    });
+
+    // The pen button should NOT have the flash class
+    const penBtn = screen.getByTitle('Pen (P)');
+    expect(penBtn.classList.contains('flash')).toBe(false);
+
+    // The arrow button SHOULD have the flash class
+    const arrowBtn = screen.getByTitle('Arrow (A)');
+    expect(arrowBtn.classList.contains('flash')).toBe(true);
+  });
+
+  it('does not flash any button when flashTool is null', () => {
+    render(Toolbar, {
+      activeTool: 'pen',
+      color: '#ff0000',
+      flashTool: null,
+    });
+
+    const allBtns = document.querySelectorAll('.tool-btn.flash');
+    expect(allBtns.length).toBe(0);
+  });
+
+  it('does not flash any button when flashTool is undefined (default)', () => {
+    render(Toolbar, {
+      activeTool: 'pen',
+      color: '#ff0000',
+      flashTool: null,
+    });
+
+    const penBtn = screen.getByTitle('Pen (P)');
+    expect(penBtn.classList.contains('active')).toBe(true);
+    expect(penBtn.classList.contains('flash')).toBe(false);
+
+    const allFlashing = document.querySelectorAll('.tool-btn.flash');
+    expect(allFlashing.length).toBe(0);
+  });
+
+  it('flashes only the matching tool button, not the active one', () => {
+    // activeTool is 'pen' but flashTool is 'rectangle' — flash on rect, not pen
+    render(Toolbar, {
+      activeTool: 'pen',
+      color: '#ff0000',
+      flashTool: 'rectangle' as Tool,
+    });
+
+    const penBtn = screen.getByTitle('Pen (P)');
+    const rectBtn = screen.getByTitle('Rectangle (R)');
+
+    expect(penBtn.classList.contains('flash')).toBe(false);
+    expect(rectBtn.classList.contains('flash')).toBe(true);
+  });
+
+  it('flashes the active tool when flashTool matches activeTool', () => {
+    render(Toolbar, {
+      activeTool: 'arrow',
+      color: '#ff0000',
+      flashTool: 'arrow' as Tool,
+    });
+
+    const arrowBtn = screen.getByTitle('Arrow (A)');
+    expect(arrowBtn.classList.contains('active')).toBe(true);
+    expect(arrowBtn.classList.contains('flash')).toBe(true);
+  });
+
+  it('title attributes include the shortcut letter hint', () => {
+    render(Toolbar, { activeTool: 'pen', color: '#ff0000' });
+
+    expect(screen.getByTitle('Pen (P)')).toBeTruthy();
+    expect(screen.getByTitle('Arrow (A)')).toBeTruthy();
+    expect(screen.getByTitle('Rectangle (R)')).toBeTruthy();
+    expect(screen.getByTitle('Text (T)')).toBeTruthy();
+    expect(screen.getByTitle('Blur (B)')).toBeTruthy();
+    expect(screen.getByTitle('Eraser (E)')).toBeTruthy();
   });
 });
