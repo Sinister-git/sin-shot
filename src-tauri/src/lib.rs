@@ -60,7 +60,8 @@ pub fn run() {
                 .build()?;
 
             let handle_clone = app.handle().clone();
-            let _tray = TrayIconBuilder::new()
+            let tray = TrayIconBuilder::new()
+                .icon(app.default_window_icon().cloned().unwrap())
                 .menu(&tray_menu)
                 .show_menu_on_left_click(false)
                 .on_menu_event(move |_app, event| match event.id().as_ref() {
@@ -76,6 +77,7 @@ pub fn run() {
                     _ => {}
                 })
                 .build(app)?;
+            app.manage(tray);
 
             Ok(())
         })
