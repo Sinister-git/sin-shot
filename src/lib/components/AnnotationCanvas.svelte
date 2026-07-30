@@ -284,6 +284,9 @@
   // Text tool — show and position the text input
   // ------------------------------------------------------------------
   function showTextInput(x: number, y: number) {
+    if (textInputVisible) {
+      commitText();
+    }
     textInputX = x;
     textInputY = y;
     textInputValue = '';
