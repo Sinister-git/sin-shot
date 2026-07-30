@@ -37,6 +37,7 @@
   let monitors: Monitor[] = $state([]);
   let primaryOffset = $state({ x: 0, y: 0 });
   let windowOffset = $state({ x: 0, y: 0 });
+  let entering = $state(false);
 
   // Full-monitor mode
   let cursorMonitor: number = $state(-1); // index into monitors[]
@@ -146,37 +147,41 @@
   // ---------------------------------------------------------------------------
 
   async function enterCaptureMode(m: 'full-monitor' | 'area-select') {
-    if (mode !== null) return; // already active
-
-    // Fetch monitor information before resizing the window.
+    if (mode !== null || entering) return;
+    entering = true;
     try {
-      monitors = await invoke<Monitor[]>('get_monitors');
-    } catch {
-      monitors = [];
-    }
-
-    // Compute the window offset (top-left of bounding box).
-    if (monitors.length > 0) {
-      let minX = Infinity;
-      let minY = Infinity;
-      for (const m of monitors) {
-        if (m.x < minX) minX = m.x;
-        if (m.y < minY) minY = m.y;
+      // Fetch monitor information before resizing the window.
+      try {
+        monitors = await invoke<Monitor[]>('get_monitors');
+      } catch {
+        monitors = [];
       }
-      windowOffset = { x: minX, y: minY };
-    }
 
-    // Find primary monitor offset.
-    const primary = monitors.find((m) => m.is_primary);
-    if (primary) {
-      primaryOffset = { x: primary.x, y: primary.y };
-    }
+      // Compute the window offset (top-left of bounding box).
+      if (monitors.length > 0) {
+        let minX = Infinity;
+        let minY = Infinity;
+        for (const m of monitors) {
+          if (m.x < minX) minX = m.x;
+          if (m.y < minY) minY = m.y;
+        }
+        windowOffset = { x: minX, y: minY };
+      }
 
-    // Tell Rust to resize and show the overlay window.
-    try {
-      await invoke('start_capture', { mode: m });
-    } catch (err) {
-      console.error('start_capture failed:', err);
+      // Find primary monitor offset.
+      const primary = monitors.find((m) => m.is_primary);
+      if (primary) {
+        primaryOffset = { x: primary.x, y: primary.y };
+      }
+
+      // Tell Rust to resize and show the overlay window.
+      try {
+        await invoke('start_capture', { mode: m });
+      } catch (err) {
+        console.error('start_capture failed:', err);
+      }
+    } finally {
+      entering = false;
     }
   }
 
@@ -191,6 +196,7 @@
   }
 
   function resetState() {
+    entering = false;
     mode = null;
     monitors = [];
     cursorMonitor = -1;
@@ -287,24 +293,22 @@
   async function confirmAreaCapture() {
     if (!selectionRect) return;
 
-    // Convert window-relative coordinates to primary-monitor-relative coordinates.
-    const x = selectionRect.left + windowOffset.x - primaryOffset.x;
-    const y = selectionRect.top + windowOffset.y - primaryOffset.y;
+    // Selection rect coordinates are window-relative. Convert to absolute
+    // desktop coordinates by adding the window offset (top-left of the
+    // monitor bounding box). The backend captures all monitors, stitches
+    // them into a virtual-desktop image, and crops to this rect.
+    const x = selectionRect.left + windowOffset.x;
+    const y = selectionRect.top + windowOffset.y;
     const width = selectionRect.width;
     const height = selectionRect.height;
 
     if (width < 2 || height < 2) {
-      // Too small — treat as cancellation.
       await cancelCapture();
       return;
     }
 
-    const primary = monitors.find((m) => m.is_primary);
-    const monitorName = primary?.name ?? '';
-
     try {
       const result = await invoke('capture_area', {
-        monitorName,
         x: Math.round(x),
         y: Math.round(y),
         width: Math.round(width),

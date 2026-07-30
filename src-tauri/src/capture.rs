@@ -52,19 +52,19 @@ pub async fn capture_full_screen(
     platform::capture_monitor(&monitor_name)
 }
 
-/// Capture a user-selected rectangular area from the monitor identified
-/// by its GDI device name. Coordinates are relative to the monitor origin.
+/// Capture a user-selected rectangular area from the virtual desktop.
+/// Coordinates are absolute desktop coordinates (across all monitors).
+/// Captures all monitors, stitches into one image, then crops to the rect.
 #[tauri::command]
 pub async fn capture_area(
     state: State<'_, Mutex<CaptureState>>,
-    monitor_name: String,
     x: i32,
     y: i32,
     width: i32,
     height: i32,
 ) -> Result<CaptureResult, String> {
     let _guard = state.lock().map_err(|e| e.to_string())?;
-    platform::capture_rect(&monitor_name, x, y, width as u32, height as u32)
+    platform::capture_desktop_rect(x, y, width as u32, height as u32)
 }
 
 // ---------------------------------------------------------------------------
@@ -305,38 +305,133 @@ mod platform {
         }
     }
 
-    pub fn capture_rect(
-        monitor_name: &str,
-        x: i32,
-        y: i32,
-        w: u32,
-        h: u32,
+    /// Capture a rectangular region from the virtual desktop.
+    /// Enumerates all DXGI outputs (attached to desktop), captures each
+    /// monitor, stitches them into one virtual-desktop image, then crops
+    /// to the requested rectangle. Coordinates are absolute desktop coords.
+    pub fn capture_desktop_rect(
+        desktop_x: i32,
+        desktop_y: i32,
+        capture_w: u32,
+        capture_h: u32,
     ) -> Result<CaptureResult, String> {
-        let (full_width, full_height, rgba) = capture_monitor_rgba(monitor_name)?;
-
-        let rx = x.max(0) as u32;
-        let ry = y.max(0) as u32;
-        let rw = w.min(full_width.saturating_sub(rx));
-        let rh = h.min(full_height.saturating_sub(ry));
-
-        if rw == 0 || rh == 0 {
-            return Err("capture rectangle is empty or out of bounds".into());
+        if capture_w == 0 || capture_h == 0 {
+            return Err("capture rectangle is empty".into());
         }
 
-        let mut cropped = Vec::with_capacity((rw * rh * 4) as usize);
-        for row in ry..(ry + rh) {
-            let start = (row * full_width * 4 + rx * 4) as usize;
-            let end = start + (rw * 4) as usize;
-            cropped.extend_from_slice(&rgba[start..end]);
+        unsafe {
+            let factory: IDXGIFactory1 =
+                CreateDXGIFactory1().map_err(|e| format!("CreateDXGIFactory1 failed: {e}"))?;
+
+            // Create one D3D11 device reused for all monitor captures.
+            let (device, context) = create_device()?;
+
+            // Enumerate all attached outputs and capture each one.
+            let mut captures: Vec<(i32, i32, u32, u32, Vec<u8>)> = Vec::new();
+            let mut min_x = i32::MAX;
+            let mut min_y = i32::MAX;
+            let mut max_x = i32::MIN;
+            let mut max_y = i32::MIN;
+
+            let mut adapter_idx = 0u32;
+            loop {
+                let adapter: IDXGIAdapter1 = match factory.EnumAdapters1(adapter_idx) {
+                    Ok(a) => a,
+                    Err(_) => break,
+                };
+                let mut output_idx = 0u32;
+                loop {
+                    let output: IDXGIOutput = match adapter.EnumOutputs(output_idx) {
+                        Ok(o) => o,
+                        Err(_) => break,
+                    };
+                    let desc = output
+                        .GetDesc()
+                        .map_err(|e| format!("GetDesc failed: {e}"))?;
+                    if desc.AttachedToDesktop.as_bool() {
+                        let output1: IDXGIOutput1 = output
+                            .cast()
+                            .map_err(|e| format!("Cast to IDXGIOutput1 failed: {e}"))?;
+                        let dupl = duplicate_output(&output1, &device)?;
+                        let (width, height, bgra) =
+                            acquire_frame(&dupl, &device, &context)?;
+                        let rgba = bgra_to_rgba(&bgra);
+
+                        let left = desc.DesktopCoordinates.left;
+                        let top = desc.DesktopCoordinates.top;
+                        let right = desc.DesktopCoordinates.right;
+                        let bottom = desc.DesktopCoordinates.bottom;
+
+                        min_x = min_x.min(left);
+                        min_y = min_y.min(top);
+                        max_x = max_x.max(right);
+                        max_y = max_y.max(bottom);
+
+                        captures.push((left, top, width, height, rgba));
+                    }
+                    output_idx += 1;
+                }
+                adapter_idx += 1;
+            }
+
+            if captures.is_empty() {
+                return Err("no attached monitors found".into());
+            }
+
+            let desktop_w = (max_x - min_x) as u32;
+            let desktop_h = (max_y - min_y) as u32;
+
+            // Stitch all captured monitor images into one virtual-desktop image.
+            let mut desktop =
+                vec![0u8; (desktop_w * desktop_h * 4) as usize];
+
+            for (left, top, width, height, rgba) in &captures {
+                let dst_x = (*left - min_x) as u32;
+                let dst_y = (*top - min_y) as u32;
+
+                for row in 0..*height {
+                    let src_start = (row * width * 4) as usize;
+                    let src_end = src_start + (*width * 4) as usize;
+                    let dst_start =
+                        ((dst_y + row) * desktop_w * 4 + dst_x * 4) as usize;
+                    let dst_end = dst_start + (*width * 4) as usize;
+                    if dst_end <= desktop.len() {
+                        desktop[dst_start..dst_end]
+                            .copy_from_slice(&rgba[src_start..src_end]);
+                    }
+                }
+            }
+
+            // Convert absolute desktop coordinates to stitched-image coords.
+            let crop_x = (desktop_x - min_x).max(0) as u32;
+            let crop_y = (desktop_y - min_y).max(0) as u32;
+            let crop_w = capture_w.min(desktop_w.saturating_sub(crop_x));
+            let crop_h = capture_h.min(desktop_h.saturating_sub(crop_y));
+
+            if crop_w == 0 || crop_h == 0 {
+                return Err(
+                    "capture rectangle is empty or out of bounds".into(),
+                );
+            }
+
+            let mut cropped =
+                Vec::with_capacity((crop_w * crop_h * 4) as usize);
+            for row in crop_y..(crop_y + crop_h) {
+                let start =
+                    (row * desktop_w * 4 + crop_x * 4) as usize;
+                let end = start + (crop_w * 4) as usize;
+                cropped.extend_from_slice(&desktop[start..end]);
+            }
+
+            let data =
+                base64::engine::general_purpose::STANDARD.encode(&cropped);
+
+            Ok(CaptureResult {
+                width: crop_w,
+                height: crop_h,
+                data,
+            })
         }
-
-        let data = base64::engine::general_purpose::STANDARD.encode(&cropped);
-
-        Ok(CaptureResult {
-            width: rw,
-            height: rh,
-            data,
-        })
     }
 }
 
@@ -352,8 +447,7 @@ mod platform {
         Err("screen capture is only supported on Windows".into())
     }
 
-    pub fn capture_rect(
-        _monitor_name: &str,
+    pub fn capture_desktop_rect(
         _x: i32,
         _y: i32,
         _w: u32,
@@ -409,7 +503,7 @@ mod tests {
         assert!(r.is_err());
         assert!(r.unwrap_err().contains("Windows"));
 
-        let r = platform::capture_rect("", 0, 0, 100, 100);
+        let r = platform::capture_desktop_rect(0, 0, 100, 100);
         assert!(r.is_err());
         assert!(r.unwrap_err().contains("Windows"));
     }
