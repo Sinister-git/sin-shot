@@ -179,6 +179,7 @@
       showToast(`Hotkey "${entry.label}" updated to ${entry.combo}`);
     } catch (e) {
       console.error('Failed to update hotkey:', e);
+      entry.combo = oldCombo;
       showToast('Failed to update hotkey');
     }
   }
