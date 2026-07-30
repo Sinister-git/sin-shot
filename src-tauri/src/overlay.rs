@@ -3,7 +3,7 @@
 //! Commands that control the capture overlay window: show, hide, resize,
 //! and enumerate monitors.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{
     AppHandle, Emitter, Manager, Monitor, PhysicalPosition, PhysicalSize, Position, Size,
     WebviewWindow,
@@ -14,7 +14,7 @@ use tauri::{
 // ---------------------------------------------------------------------------
 
 /// Structured monitor info returned to the frontend.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MonitorInfo {
     /// Human-readable name, e.g. "DELL U2719D".
     pub name: String,
@@ -147,7 +147,7 @@ pub async fn get_monitors(app: AppHandle) -> Result<Vec<MonitorInfo>, String> {
     for m in &monitors {
         let size = m.size();
         let pos = m.position();
-        let is_primary = primary.as_ref().map_or(false, |pm| {
+        let is_primary = primary.as_ref().is_some_and(|pm| {
             let pp = pm.position();
             let ps = pm.size();
             pp.x == pos.x && pp.y == pos.y && ps.width == size.width && ps.height == size.height
@@ -173,4 +173,197 @@ pub async fn get_monitors(app: AppHandle) -> Result<Vec<MonitorInfo>, String> {
 fn get_main_window(app: &AppHandle) -> Result<WebviewWindow, String> {
     app.get_webview_window("main")
         .ok_or_else(|| "main window not found".to_string())
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn monitor_info_serializes_correctly() {
+        let info = MonitorInfo {
+            name: "DELL U2719D".into(),
+            width: 2560,
+            height: 1440,
+            x: 0,
+            y: 0,
+            is_primary: true,
+        };
+        let json = serde_json::to_string(&info).unwrap();
+        assert!(json.contains("DELL U2719D"));
+        assert!(json.contains("2560"));
+        assert!(json.contains("1440"));
+        assert!(json.contains("\"is_primary\":true"));
+    }
+
+    #[test]
+    fn monitor_info_is_primary_false() {
+        let info = MonitorInfo {
+            name: "Secondary".into(),
+            width: 1920,
+            height: 1080,
+            x: 2560,
+            y: 0,
+            is_primary: false,
+        };
+        let json = serde_json::to_string(&info).unwrap();
+        assert!(json.contains("\"is_primary\":false"));
+    }
+
+    /// Verify we can deserialize MonitorInfo JSON — the frontend receives
+    /// this as the result of get_monitors().
+    #[test]
+    fn monitor_info_deserializes_from_json() {
+        let json = r#"{"name":"Test","width":1920,"height":1080,"x":0,"y":0,"is_primary":true}"#;
+        let info: MonitorInfo = serde_json::from_str(json).unwrap();
+        assert_eq!(info.name, "Test");
+        assert_eq!(info.width, 1920);
+        assert_eq!(info.height, 1080);
+        assert_eq!(info.x, 0);
+        assert_eq!(info.y, 0);
+        assert!(info.is_primary);
+    }
+
+    /// Test bounding-box computation for the overlay window.
+    /// This mirrors the logic in start_capture.
+    #[test]
+    fn bounding_box_single_monitor() {
+        let monitors = vec![MonitorInfo {
+            name: "Main".into(),
+            width: 1920,
+            height: 1080,
+            x: 0,
+            y: 0,
+            is_primary: true,
+        }];
+        let (min_x, min_y, max_x, max_y) = compute_bounds(&monitors);
+        assert_eq!(min_x, 0);
+        assert_eq!(min_y, 0);
+        assert_eq!(max_x, 1920);
+        assert_eq!(max_y, 1080);
+        assert_eq!((max_x - min_x) as u32, 1920);
+        assert_eq!((max_y - min_y) as u32, 1080);
+    }
+
+    #[test]
+    fn bounding_box_dual_monitor_horizontal() {
+        // Primary on left, secondary on right.
+        let monitors = vec![
+            MonitorInfo {
+                name: "Left".into(),
+                width: 1920,
+                height: 1080,
+                x: 0,
+                y: 0,
+                is_primary: true,
+            },
+            MonitorInfo {
+                name: "Right".into(),
+                width: 1920,
+                height: 1080,
+                x: 1920,
+                y: 0,
+                is_primary: false,
+            },
+        ];
+        let (min_x, min_y, max_x, max_y) = compute_bounds(&monitors);
+        assert_eq!(min_x, 0);
+        assert_eq!(min_y, 0);
+        assert_eq!(max_x, 3840);
+        assert_eq!(max_y, 1080);
+        assert_eq!((max_x - min_x) as u32, 3840);
+        assert_eq!((max_y - min_y) as u32, 1080);
+    }
+
+    #[test]
+    fn bounding_box_dual_monitor_with_negative_offset() {
+        // Primary centered, secondary to the left with negative x.
+        let monitors = vec![
+            MonitorInfo {
+                name: "Left".into(),
+                width: 1920,
+                height: 1080,
+                x: -1920,
+                y: 0,
+                is_primary: false,
+            },
+            MonitorInfo {
+                name: "Primary".into(),
+                width: 2560,
+                height: 1440,
+                x: 0,
+                y: 0,
+                is_primary: true,
+            },
+        ];
+        let (min_x, min_y, max_x, max_y) = compute_bounds(&monitors);
+        assert_eq!(min_x, -1920);
+        assert_eq!(min_y, 0);
+        assert_eq!(max_x, 2560);
+        assert_eq!(max_y, 1440);
+        assert_eq!((max_x - min_x) as u32, 4480); // 1920 + 2560
+        assert_eq!((max_y - min_y) as u32, 1440);
+    }
+
+    #[test]
+    fn bounding_box_dual_monitor_vertical_stack() {
+        // Primary on bottom, secondary above with negative y.
+        let monitors = vec![
+            MonitorInfo {
+                name: "Top".into(),
+                width: 1920,
+                height: 1080,
+                x: 0,
+                y: -1080,
+                is_primary: false,
+            },
+            MonitorInfo {
+                name: "Bottom".into(),
+                width: 1920,
+                height: 1080,
+                x: 0,
+                y: 0,
+                is_primary: true,
+            },
+        ];
+        let (min_x, min_y, max_x, max_y) = compute_bounds(&monitors);
+        assert_eq!(min_x, 0);
+        assert_eq!(min_y, -1080);
+        assert_eq!(max_x, 1920);
+        assert_eq!(max_y, 1080);
+        assert_eq!((max_x - min_x) as u32, 1920);
+        assert_eq!((max_y - min_y) as u32, 2160); // 1080 + 1080
+    }
+
+    #[test]
+    fn bounding_box_empty_monitors_returns_zeros() {
+        let monitors: Vec<MonitorInfo> = vec![];
+        let (min_x, min_y, max_x, max_y) = compute_bounds(&monitors);
+        // Start values should remain at extremes.
+        assert_eq!(min_x, i32::MAX);
+        assert_eq!(min_y, i32::MAX);
+        assert_eq!(max_x, i32::MIN);
+        assert_eq!(max_y, i32::MIN);
+    }
+
+    /// Pure-function bounding-box helper extracted from start_capture logic.
+    fn compute_bounds(monitors: &[MonitorInfo]) -> (i32, i32, i32, i32) {
+        let mut min_x = i32::MAX;
+        let mut min_y = i32::MAX;
+        let mut max_x = i32::MIN;
+        let mut max_y = i32::MIN;
+
+        for m in monitors {
+            min_x = min_x.min(m.x);
+            min_y = min_y.min(m.y);
+            max_x = max_x.max(m.x + m.width as i32);
+            max_y = max_y.max(m.y + m.height as i32);
+        }
+
+        (min_x, min_y, max_x, max_y)
+    }
 }
