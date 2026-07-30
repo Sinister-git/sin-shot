@@ -16,6 +16,10 @@ Environment=PORT=8080
 Environment=STORAGE_DIR=/opt/sin-shot-server/uploads
 Environment=MAX_FILE_SIZE_MB=25
 Environment=BASE_URL=https://sinister.ovh
+# Google OAuth client ID for gallery auth (optional — disables auth if empty)
+Environment=GOOGLE_CLIENT_ID=
+# Comma-separated CORS origins (defaults to BASE_URL origin)
+Environment=CORS_ORIGINS=
 
 # Security hardening
 NoNewPrivileges=yes
