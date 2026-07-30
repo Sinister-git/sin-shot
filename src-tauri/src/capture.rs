@@ -195,16 +195,13 @@ mod platform {
             let mut info = DXGI_OUTDUPL_FRAME_INFO::default();
             let mut resource: Option<IDXGIResource> = None;
 
-            loop {
-                let hr = dupl.AcquireNextFrame(1000, &mut info, &mut resource);
-                if hr == DXGI_ERROR_WAIT_TIMEOUT {
-                    return Err(
-                        "timeout acquiring next frame — screen may be locked or no updates".into(),
-                    );
-                }
-                hr.map_err(|e| format!("AcquireNextFrame failed: {e}"))?;
-                break;
+            let hr = dupl.AcquireNextFrame(1000, &mut info, &mut resource);
+            if hr == DXGI_ERROR_WAIT_TIMEOUT {
+                return Err(
+                    "timeout acquiring next frame — screen may be locked or no updates".into(),
+                );
             }
+            hr.map_err(|e| format!("AcquireNextFrame failed: {e}"))?;
 
             let resource = resource.ok_or("AcquireNextFrame returned null resource")?;
 
@@ -398,6 +395,12 @@ mod platform {
                     if dst_end <= desktop.len() {
                         desktop[dst_start..dst_end]
                             .copy_from_slice(&rgba[src_start..src_end]);
+                    } else {
+                        eprintln!(
+                            "capture_desktop_rect: skipping row {} for monitor at ({},{}): \
+                             texture width ({}) exceeds desktop bounds (dst_end {} > desktop {})",
+                            row, left, top, width, dst_end, desktop.len()
+                        );
                     }
                 }
             }

@@ -35,7 +35,6 @@
 
   let mode: CaptureMode = $state(null);
   let monitors: Monitor[] = $state([]);
-  let primaryOffset = $state({ x: 0, y: 0 });
   let windowOffset = $state({ x: 0, y: 0 });
   let entering = $state(false);
 
@@ -168,12 +167,6 @@
         windowOffset = { x: minX, y: minY };
       }
 
-      // Find primary monitor offset.
-      const primary = monitors.find((m) => m.is_primary);
-      if (primary) {
-        primaryOffset = { x: primary.x, y: primary.y };
-      }
-
       // Tell Rust to resize and show the overlay window.
       try {
         await invoke('start_capture', { mode: m });
@@ -187,6 +180,7 @@
 
   async function cancelCapture() {
     mode = null;
+    entering = true;
     try {
       await invoke('cancel_capture');
     } catch (err) {
