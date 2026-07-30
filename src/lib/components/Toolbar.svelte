@@ -4,9 +4,10 @@
   interface Props {
     activeTool: Tool;
     color: string;
+    flashTool?: Tool | null;
   }
 
-  let { activeTool = $bindable(), color = $bindable() }: Props = $props();
+  let { activeTool = $bindable(), color = $bindable(), flashTool = null }: Props = $props();
 
   const tools: { id: Tool; label: string; icon: string }[] = [
     { id: 'pen', label: 'Pen', icon: '✏' },
@@ -36,7 +37,8 @@
     <button
       class="tool-btn"
       class:active={activeTool === tool.id}
-      title={tool.label}
+      class:flash={flashTool === tool.id}
+      title="{tool.label} ({tool.id[0].toUpperCase()})"
       onclick={() => selectTool(tool.id)}
       aria-pressed={activeTool === tool.id}
     >
@@ -106,6 +108,21 @@
   .tool-btn.active {
     background: rgba(70, 130, 255, 0.7);
     color: #fff;
+  }
+
+  .tool-btn.flash {
+    animation: tool-flash 0.35s ease-out;
+  }
+
+  @keyframes tool-flash {
+    0% {
+      box-shadow: 0 0 4px 2px rgba(70, 130, 255, 0.9);
+      background: rgba(70, 130, 255, 0.85);
+    }
+    100% {
+      box-shadow: 0 0 12px 6px rgba(70, 130, 255, 0);
+      background: rgba(70, 130, 255, 0.7);
+    }
   }
 
   .tool-icon {
