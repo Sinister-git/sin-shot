@@ -93,7 +93,7 @@ mod platform {
     use std::sync::{LazyLock, Mutex};
     use std::thread;
     use tauri::AppHandle;
-    use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM, HMODULE};
+    use windows::Win32::Foundation::{HINSTANCE, HMODULE, HWND, LPARAM, LRESULT, WPARAM};
     use windows::Win32::System::LibraryLoader::GetModuleHandleA;
     use windows::Win32::UI::Input::KeyboardAndMouse::*;
     use windows::Win32::UI::WindowsAndMessaging::*;
@@ -287,12 +287,8 @@ mod platform {
                         vk,
                         result_tx,
                     }) => {
-                        let result = RegisterHotKey(
-                            Some(hwnd),
-                            id,
-                            HOT_KEY_MODIFIERS(modifiers),
-                            vk,
-                        );
+                        let result =
+                            RegisterHotKey(Some(hwnd), id, HOT_KEY_MODIFIERS(modifiers), vk);
                         let _ = result_tx
                             .send(result.map_err(|e| format!("RegisterHotKey failed: {e:?}")));
                     }
@@ -401,10 +397,8 @@ mod platform {
         let tx = THREAD_TX.lock().unwrap();
         let tx = tx.as_ref().ok_or("hotkey thread not initialised")?;
 
-        tx.send(ThreadCmd::Unregister {
-            id,
-        })
-        .map_err(|e| format!("failed to send unregister command: {e}"))?;
+        tx.send(ThreadCmd::Unregister { id })
+            .map_err(|e| format!("failed to send unregister command: {e}"))?;
 
         COMBO_IDS.lock().unwrap().remove(combo);
 
