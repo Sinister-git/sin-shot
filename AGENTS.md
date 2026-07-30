@@ -29,11 +29,21 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 
 - **Stack**: Rust (axum + tokio), single binary, `server/` directory
 - **Check/build**: `cargo check --manifest-path server/Cargo.toml`, `cargo build --release --manifest-path server/Cargo.toml`
-- **Config**: env vars `PORT` (8080), `STORAGE_DIR` (./uploads), `MAX_FILE_SIZE_MB` (25), `BASE_URL` (https://sinister.ovh)
-- **Endpoints**: `POST /api/upload` (multipart, field `image`), `GET /<key>` (serves stored image)
+- **Lint**: `cargo clippy --manifest-path server/Cargo.toml -- -D warnings`
+- **Config**: env vars `PORT` (8080), `STORAGE_DIR` (./uploads), `MAX_FILE_SIZE_MB` (25), `BASE_URL` (https://sinister.ovh), `GOOGLE_CLIENT_ID` (optional, enables gallery auth), `CORS_ORIGINS` (comma-separated, defaults to BASE_URL origin)
+- **Endpoints**: `POST /api/upload` (multipart, field `image`), `GET /<key>` (serves stored image), `GET /api/gallery` (list images, requires auth), `DELETE /api/image/<key>` (delete image, requires auth)
+- **Auth**: Gallery endpoints require `Authorization: Bearer <google-id-token>`. Token verified against Google's tokeninfo endpoint. Auth disabled if `GOOGLE_CLIENT_ID` is empty.
 - **Rate limit**: 10 req/60s per IP, token bucket
 - **Formats**: PNG, JPEG, WebP — detected by magic bytes, stored as `<key>.<ext>`
 - **Deploy**: Dockerfile (alpine/musl static) or systemd unit at `server/systemd/sin-shot-server.service`
+
+## Web Gallery — SvelteKit Gallery Route
+
+- **Route**: `src/routes/gallery/+page.svelte` — SPA client-side page at `/gallery`
+- **API client**: `src/lib/gallery-api.ts` — typed fetch wrapper for gallery endpoints
+- **Build-time env**: `VITE_GALLERY_API_URL` (default https://sinister.ovh), `VITE_GOOGLE_CLIENT_ID` (Google OAuth client ID)
+- **Auth**: Google Sign-In via GIS (`accounts.google.com/gsi/client`), ID token stored in localStorage, sent as Bearer token
+- **Deploy**: static SPA build (`npm run build` → `build/`), served from `screenshots.sinister.ovh` pointing to the `build/` directory, with nginx configured to fallback to `index.html` for SPA routing
 
 ## Maintaining this file
 
