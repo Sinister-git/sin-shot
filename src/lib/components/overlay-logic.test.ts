@@ -250,15 +250,15 @@ describe('selectionToDesktopCoords', () => {
 });
 
 describe('selection persistence after mouseup (minimum size check)', () => {
-  it('rejects selections smaller than 2×2 pixels', () => {
-    // This mirrors the logic: if w < 2 && h < 2, selection is null.
+  it('rejects selections with any dimension smaller than 2 pixels', () => {
+    // This mirrors the logic: if w < 2 || h < 2, selection is null.
     function isTooSmall(sel: SelectionRect): boolean {
-      return sel.width < 2 && sel.height < 2;
+      return sel.width < 2 || sel.height < 2;
     }
     expect(isTooSmall({ left: 0, top: 0, width: 0, height: 0 })).toBe(true);
     expect(isTooSmall({ left: 0, top: 0, width: 1, height: 1 })).toBe(true);
-    expect(isTooSmall({ left: 0, top: 0, width: 1, height: 3 })).toBe(false);
-    expect(isTooSmall({ left: 0, top: 0, width: 3, height: 1 })).toBe(false);
+    expect(isTooSmall({ left: 0, top: 0, width: 1, height: 3 })).toBe(true);
+    expect(isTooSmall({ left: 0, top: 0, width: 3, height: 1 })).toBe(true);
     expect(isTooSmall({ left: 0, top: 0, width: 2, height: 2 })).toBe(false);
   });
 });
