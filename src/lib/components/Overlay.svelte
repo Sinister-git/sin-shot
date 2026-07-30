@@ -115,6 +115,14 @@
     return cleanupListeners;
   });
 
+  $effect(() => {
+    if (mode !== null) {
+      document.body.classList.add('capture-active');
+    } else {
+      document.body.classList.remove('capture-active');
+    }
+  });
+
   // Global keyboard handler
   function onKeydown(e: KeyboardEvent) {
     if (mode === null) return;
@@ -562,6 +570,9 @@
     margin: 0;
     padding: 0;
     overflow: hidden;
+  }
+
+  :global(body.capture-active) {
     background: transparent;
   }
 </style>

@@ -130,24 +130,43 @@ mod platform {
         Ok((device, context))
     }
 
-    /// Get the output (monitor) at `monitor_index`.
+    /// Get the output (monitor) at `monitor_index` by enumerating all
+    /// adapters and outputs into a flat list, then indexing into it.
     fn get_output(
         factory: &IDXGIFactory1,
         monitor_index: u32,
     ) -> Result<(IDXGIOutput1, DXGI_OUTPUT_DESC), String> {
         unsafe {
-            let adapter: IDXGIAdapter1 = factory
-                .EnumAdapters1(monitor_index)
-                .map_err(|e| format!("EnumAdapters1({monitor_index}) failed: {e}"))?;
+            let mut outputs: Vec<(IDXGIOutput, DXGI_OUTPUT_DESC)> = Vec::new();
+            let mut adapter_idx = 0u32;
+            loop {
+                let adapter: IDXGIAdapter1 = match factory.EnumAdapters1(adapter_idx) {
+                    Ok(a) => a,
+                    Err(_) => break,
+                };
+                let mut output_idx = 0u32;
+                loop {
+                    let output: IDXGIOutput = match adapter.EnumOutputs(output_idx) {
+                        Ok(o) => o,
+                        Err(_) => break,
+                    };
+                    let desc = output
+                        .GetDesc()
+                        .map_err(|e| format!("GetDesc failed: {e}"))?;
+                    outputs.push((output, desc));
+                    output_idx += 1;
+                }
+                adapter_idx += 1;
+            }
 
-            let output: IDXGIOutput = adapter
-                .EnumOutputs(0)
-                .map_err(|e| format!("EnumOutputs failed: {e}"))?;
+            if (monitor_index as usize) >= outputs.len() {
+                return Err(format!(
+                    "monitor index {monitor_index} out of range (found {} outputs)",
+                    outputs.len()
+                ));
+            }
 
-            let desc = output
-                .GetDesc()
-                .map_err(|e| format!("GetDesc failed: {e}"))?;
-
+            let (output, desc) = outputs.remove(monitor_index as usize);
             let output1: IDXGIOutput1 = output
                 .cast()
                 .map_err(|e| format!("Cast to IDXGIOutput1 failed: {e}"))?;

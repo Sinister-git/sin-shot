@@ -4,7 +4,10 @@
 //! and enumerate monitors.
 
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, Position, Size, WebviewWindow};
+use tauri::{
+    AppHandle, Emitter, Manager, Monitor, PhysicalPosition, PhysicalSize, Position, Size,
+    WebviewWindow,
+};
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -108,6 +111,18 @@ pub async fn cancel_capture(app: AppHandle) -> Result<(), String> {
         }))
         .map_err(|e| format!("set_size: {e}"))?;
 
+    // Reset position to center on primary monitor.
+    if let Ok(Some(pm)) = window.primary_monitor() {
+        let ppos = pm.position();
+        let psize = pm.size();
+        let cx = ppos.x + (psize.width as i32 - 800) / 2;
+        let cy = ppos.y + (psize.height as i32 - 600) / 2;
+        let _ = window.set_position(Position::Physical(PhysicalPosition {
+            x: cx.max(0),
+            y: cy.max(0),
+        }));
+    }
+
     window
         .emit("capture-mode-cancelled", ())
         .map_err(|e| format!("emit: {e}"))?;
@@ -124,17 +139,26 @@ pub async fn get_monitors(app: AppHandle) -> Result<Vec<MonitorInfo>, String> {
         .available_monitors()
         .map_err(|e| format!("failed to enumerate monitors: {e}"))?;
 
+    let primary: Option<Monitor> = window
+        .primary_monitor()
+        .map_err(|e| format!("primary_monitor: {e}"))?;
+
     let mut result = Vec::new();
     for m in &monitors {
         let size = m.size();
         let pos = m.position();
+        let is_primary = primary.as_ref().map_or(false, |pm| {
+            let pp = pm.position();
+            let ps = pm.size();
+            pp.x == pos.x && pp.y == pos.y && ps.width == size.width && ps.height == size.height
+        });
         result.push(MonitorInfo {
             name: m.name().map(|s| s.to_string()).unwrap_or_else(|| "Unknown".to_string()),
             width: size.width,
             height: size.height,
             x: pos.x,
             y: pos.y,
-            is_primary: pos.x == 0 && pos.y == 0,
+            is_primary,
         });
     }
 
