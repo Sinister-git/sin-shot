@@ -12,7 +12,7 @@
 </script>
 
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import {
     fetchGallery,
     deleteImage,
@@ -60,6 +60,35 @@
 
   // ── Google Sign-In ──────────────────────────────────────────────────
 
+  function renderGisButton() {
+    const clientId = getGoogleClientId();
+    if (!clientId) {
+      authError = 'Google Sign-In is not configured (missing GOOGLE_CLIENT_ID).';
+      return;
+    }
+
+    try {
+      google.accounts.id.initialize({
+        client_id: clientId,
+        callback: handleCredentialResponse,
+      });
+      gisReady = true;
+
+      google.accounts.id.renderButton(
+        document.getElementById('google-signin-btn'),
+        {
+          theme: 'filled_black',
+          size: 'large',
+          text: 'signin_with',
+          shape: 'rectangular',
+          width: 280,
+        }
+      );
+    } catch (e) {
+      authError = `Failed to initialize Google Sign-In: ${e}`;
+    }
+  }
+
   function initGoogleSignIn() {
     const clientId = getGoogleClientId();
     if (!clientId) {
@@ -67,33 +96,15 @@
       return;
     }
 
-    // Load the GIS library dynamically
+    if (typeof google !== 'undefined') {
+      renderGisButton();
+      return;
+    }
+
     const script = document.createElement('script');
     script.src = 'https://accounts.google.com/gsi/client';
     script.async = true;
-    script.onload = () => {
-      try {
-        google.accounts.id.initialize({
-          client_id: clientId,
-          callback: handleCredentialResponse,
-        });
-        gisReady = true;
-
-        // Render the button into our container
-        google.accounts.id.renderButton(
-          document.getElementById('google-signin-btn'),
-          {
-            theme: 'filled_black',
-            size: 'large',
-            text: 'signin_with',
-            shape: 'rectangular',
-            width: 280,
-          }
-        );
-      } catch (e) {
-        authError = `Failed to initialize Google Sign-In: ${e}`;
-      }
-    };
+    script.onload = () => renderGisButton();
     script.onerror = () => {
       authError = 'Failed to load Google Sign-In library.';
     };
@@ -119,18 +130,21 @@
     loadImages();
   }
 
-  function signOut() {
+  async function signOut() {
     clearToken();
     isSignedIn = false;
     userName = '';
     userAvatar = '';
     images = [];
-    // Revoke Google session
+    gisReady = false;
+    authError = '';
     try {
       google.accounts.id.disableAutoSelect();
     } catch {
       // GIS may not be loaded
     }
+    await tick();
+    initGoogleSignIn();
   }
 
   // ── Data fetching ───────────────────────────────────────────────────
