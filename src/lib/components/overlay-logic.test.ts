@@ -262,3 +262,63 @@ describe('selection persistence after mouseup (minimum size check)', () => {
     expect(isTooSmall({ left: 0, top: 0, width: 2, height: 2 })).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Dynamic hotkey combo comparison (mirrors Overlay.svelte event handler)
+// ---------------------------------------------------------------------------
+
+describe('dynamic hotkey combo comparison', () => {
+  /**
+   * Pure function that mirrors the hotkey-pressed event handler logic
+   * in Overlay.svelte. Instead of hardcoding 'Ctrl+Shift+1'/'Ctrl+Shift+2',
+   * it compares against dynamically-loaded combo strings.
+   */
+  function resolveCaptureMode(
+    combo: string,
+    hotkeyFull: string,
+    hotkeyArea: string,
+  ): 'full-monitor' | 'area-select' | null {
+    if (combo === hotkeyFull) return 'full-monitor';
+    if (combo === hotkeyArea) return 'area-select';
+    return null;
+  }
+
+  it('matches default hotkeys', () => {
+    expect(resolveCaptureMode('Ctrl+Shift+1', 'Ctrl+Shift+1', 'Ctrl+Shift+2')).toBe('full-monitor');
+    expect(resolveCaptureMode('Ctrl+Shift+2', 'Ctrl+Shift+1', 'Ctrl+Shift+2')).toBe('area-select');
+  });
+
+  it('matches custom hotkeys loaded from settings', () => {
+    // Simulates settings returning Ctrl+Shift+F for full, Ctrl+Shift+A for area
+    const hotkeyFull = 'Ctrl+Shift+F';
+    const hotkeyArea = 'Ctrl+Shift+A';
+
+    expect(resolveCaptureMode('Ctrl+Shift+F', hotkeyFull, hotkeyArea)).toBe('full-monitor');
+    expect(resolveCaptureMode('Ctrl+Shift+A', hotkeyFull, hotkeyArea)).toBe('area-select');
+    expect(resolveCaptureMode('Ctrl+Shift+1', hotkeyFull, hotkeyArea)).toBeNull();
+    expect(resolveCaptureMode('Ctrl+Shift+2', hotkeyFull, hotkeyArea)).toBeNull();
+  });
+
+  it('returns null for unrecognized combos', () => {
+    expect(resolveCaptureMode('Alt+F4', 'Ctrl+Shift+1', 'Ctrl+Shift+2')).toBeNull();
+    expect(resolveCaptureMode('Ctrl+C', 'Ctrl+Shift+1', 'Ctrl+Shift+2')).toBeNull();
+  });
+
+  it('updates combos dynamically (simulating settings-changed event)', () => {
+    // Initial state
+    let hotkeyFull = 'Ctrl+Shift+1';
+    let hotkeyArea = 'Ctrl+Shift+2';
+
+    expect(resolveCaptureMode('Ctrl+Shift+1', hotkeyFull, hotkeyArea)).toBe('full-monitor');
+
+    // Simulate receiving a settings-changed event
+    hotkeyFull = 'Ctrl+Shift+F';
+    hotkeyArea = 'Ctrl+Shift+A';
+
+    // Old combo should no longer match
+    expect(resolveCaptureMode('Ctrl+Shift+1', hotkeyFull, hotkeyArea)).toBeNull();
+    // New combo should match
+    expect(resolveCaptureMode('Ctrl+Shift+F', hotkeyFull, hotkeyArea)).toBe('full-monitor');
+    expect(resolveCaptureMode('Ctrl+Shift+A', hotkeyFull, hotkeyArea)).toBe('area-select');
+  });
+});
