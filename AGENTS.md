@@ -30,20 +30,30 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 - **Stack**: Rust (axum + tokio), single binary, `server/` directory
 - **Check/build**: `cargo check --manifest-path server/Cargo.toml`, `cargo build --release --manifest-path server/Cargo.toml`
 - **Lint**: `cargo clippy --manifest-path server/Cargo.toml -- -D warnings`
-- **Config**: env vars `PORT` (8080), `STORAGE_DIR` (./uploads), `MAX_FILE_SIZE_MB` (25), `BASE_URL` (https://sinister.ovh), `GOOGLE_CLIENT_ID` (optional, enables gallery auth), `CORS_ORIGINS` (comma-separated, defaults to BASE_URL origin)
+- **Config**: env vars `PORT` (8080), `STORAGE_DIR` (./uploads), `STATIC_DIR` (./gallery-web/build), `MAX_FILE_SIZE_MB` (25), `BASE_URL` (https://sinister.ovh), `GOOGLE_CLIENT_ID` (optional, enables gallery auth), `CORS_ORIGINS` (comma-separated, defaults to BASE_URL origin)
 - **Endpoints**: `POST /api/upload` (multipart, field `image`), `GET /<key>` (serves stored image), `GET /x/{key}` (short URL alias for serving images), `GET /api/gallery` (list images, requires auth), `DELETE /api/image/<key>` (delete image, requires auth)
+- **Static files**: Serves `STATIC_DIR` (gallery-web/build) for `/` and `/_app/*` with SPA fallback to `index.html`. A `/favicon.png` route is registered before `/{key}` to avoid conflicting with the image key pattern.
 - **Auth**: Gallery endpoints require `Authorization: Bearer <google-id-token>`. Token verified against Google's tokeninfo endpoint. Auth disabled if `GOOGLE_CLIENT_ID` is empty.
 - **Rate limit**: 10 req/60s per IP, token bucket
 - **Formats**: PNG, JPEG, WebP — detected by magic bytes, stored as `<key>.<ext>`
 - **Deploy**: Dockerfile (alpine/musl static) or systemd unit at `server/systemd/sin-shot-server.service`
 
-## Web Gallery — SvelteKit Gallery Route
+## Gallery Web — Standalone SvelteKit Web App
 
-- **Route**: `src/routes/gallery/+page.svelte` — SPA client-side page at `/gallery`
-- **API client**: `src/lib/gallery-api.ts` — typed fetch wrapper for gallery endpoints
+- **Stack**: SvelteKit with `@sveltejs/adapter-static`, builds to `gallery-web/build/`
+- **Directory**: `gallery-web/` — separate from the desktop app's `src/`
+- **Build**: `cd gallery-web && npm run build` (or `npm install && npm run build`)
+- **Check**: `cd gallery-web && npm run check`
+- **Root page**: `src/routes/+page.svelte` — sign-in screen (when not authenticated) and image grid gallery (when authenticated)
+- **API client**: `src/lib/gallery-api.ts` — copied from desktop app, uses `fetch` + `localStorage`, no Tauri dependencies
 - **Build-time env**: `VITE_GALLERY_API_URL` (default https://sinister.ovh), `VITE_GOOGLE_CLIENT_ID` (Google OAuth client ID)
 - **Auth**: Google Sign-In via GIS (`accounts.google.com/gsi/client`), ID token stored in localStorage, sent as Bearer token
-- **Deploy**: static SPA build (`npm run build` → `build/`), served from `screenshots.sinister.ovh` pointing to the `build/` directory, with nginx configured to fallback to `index.html` for SPA routing
+- **Deploy**: Server serves static files from `gallery-web/build/` with SPA fallback. Dockerfile builds both the Rust server and this frontend.
+
+## Desktop App Gallery Route (legacy)
+
+- **Route**: `src/routes/gallery/+page.svelte` — existing SPA page at `/gallery` inside the Tauri desktop app
+- **Note**: This remains in the desktop app for in-app gallery access. The standalone gallery-web is the canonical web version.
 
 ## Maintaining this file
 

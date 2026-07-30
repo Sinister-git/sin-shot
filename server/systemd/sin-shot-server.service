@@ -14,6 +14,7 @@ RestartSec=5
 # Environment
 Environment=PORT=8080
 Environment=STORAGE_DIR=/opt/sin-shot-server/uploads
+Environment=STATIC_DIR=/opt/sin-shot-server/gallery-web/build
 Environment=MAX_FILE_SIZE_MB=25
 Environment=BASE_URL=https://sinister.ovh
 # Google OAuth client ID for gallery auth (optional — disables auth if empty)
@@ -27,7 +28,7 @@ PrivateTmp=yes
 ProtectSystem=strict
 ProtectHome=yes
 ReadWritePaths=/opt/sin-shot-server/uploads
-ReadOnlyPaths=/opt/sin-shot-server/sin-shot-server
+ReadOnlyPaths=/opt/sin-shot-server/sin-shot-server /opt/sin-shot-server/gallery-web/build
 
 [Install]
 WantedBy=multi-user.target
