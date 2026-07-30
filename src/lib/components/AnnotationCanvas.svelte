@@ -137,8 +137,9 @@
       const c = canvasEl!.getContext('2d');
       if (c) {
         ctx = c;
+        undoStack = [];
+        redoStack = [];
         ctx.drawImage(img, 0, 0);
-        // Snapshot initial state
         pushSnapshot();
       }
     };
