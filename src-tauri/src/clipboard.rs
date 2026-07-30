@@ -18,15 +18,16 @@ impl ClipboardState {
     }
 }
 
-/// Copy image bytes to the system clipboard.
+/// Copy base64-encoded PNG image to the system clipboard.
 #[tauri::command]
 pub async fn copy_to_clipboard(
     state: State<'_, Mutex<ClipboardState>>,
-    _image_data: Vec<u8>,
+    image_data: Vec<u8>,
 ) -> Result<(), String> {
     let mut guard = state.lock().map_err(|e| e.to_string())?;
-    // TODO: write image to Windows clipboard
-    guard.last_clipboard_content = Some("image_stub".into());
+    let len = image_data.len();
+    // TODO: write image bytes to Windows clipboard
+    guard.last_clipboard_content = Some(format!("image_{len}_bytes"));
     Ok(())
 }
 

@@ -2,12 +2,14 @@ mod capture;
 mod clipboard;
 mod hotkeys;
 mod overlay;
+mod save;
 mod settings;
 mod upload;
 
 use capture::CaptureState;
 use clipboard::ClipboardState;
 use hotkeys::HotkeyState;
+use save::SaveState;
 use tauri::Manager;
 use tauri::{
     menu::{MenuBuilder, MenuItemBuilder},
@@ -23,6 +25,7 @@ pub fn run() {
         .manage(std::sync::Mutex::new(ClipboardState::new()))
         .manage(std::sync::Mutex::new(HotkeyState::new()))
         .manage(std::sync::Mutex::new(UploadState::new()))
+        .manage(std::sync::Mutex::new(SaveState::new()))
         .setup(|app| {
             // Initialise the platform hotkey thread (Windows) / no-op (Linux).
             hotkeys::init_hotkey_system();
@@ -93,6 +96,7 @@ pub fn run() {
             settings::get_hotkeys,
             settings::show_settings,
             upload::upload_screenshot,
+            save::save_to_file,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
