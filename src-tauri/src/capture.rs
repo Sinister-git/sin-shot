@@ -1,15 +1,33 @@
 /// DXGI/DirectX screen capture module.
 ///
-/// Stub — will implement full-monitor and area-select capture
-/// using the Windows Desktop Duplication API (DXGI).
-/// Tauri command entry points for capture workflows live here.
+/// Captures entire monitors or rectangular areas using the Windows
+/// Desktop Duplication API (DXGI). Returns RGBA pixel data as base64.
+///
+/// On non-Windows platforms, commands return an error — the frontend
+/// already handles this by checking `__TAURI_INTERNALS__`.
 
-use tauri::State;
+use serde::Serialize;
 use std::sync::Mutex;
+use tauri::State;
 
+// ---------------------------------------------------------------------------
+// Public types
+// ---------------------------------------------------------------------------
+
+/// Structured result returned to the frontend after a capture.
+#[derive(Debug, Clone, Serialize)]
+pub struct CaptureResult {
+    /// Image width in pixels.
+    pub width: u32,
+    /// Image height in pixels.
+    pub height: u32,
+    /// Base64-encoded RGBA pixel data (row-major, tightly packed).
+    pub data: String,
+}
+
+/// Managed state holding platform-specific capture resources.
 #[allow(dead_code)]
 pub struct CaptureState {
-    /// Placeholder for DXGI output duplication state.
     pub initialized: bool,
 }
 
@@ -19,24 +37,304 @@ impl CaptureState {
     }
 }
 
-/// Capture the entire primary monitor.
+// ---------------------------------------------------------------------------
+// Tauri commands — signatures match the scaffold exactly
+// ---------------------------------------------------------------------------
+
+/// Capture the entire monitor at `monitor_index`.
+///
+/// The primary monitor is index 0.
 #[tauri::command]
-pub async fn capture_full_screen(state: State<'_, Mutex<CaptureState>>) -> Result<String, String> {
+pub async fn capture_full_screen(
+    state: State<'_, Mutex<CaptureState>>,
+    monitor_index: u32,
+) -> Result<CaptureResult, String> {
     let _guard = state.lock().map_err(|e| e.to_string())?;
-    // TODO: implement DXGI full-screen capture
-    Ok("full_screen_capture_stub".into())
+    platform::capture_monitor(monitor_index)
 }
 
-/// Capture a user-selected rectangular area.
+/// Capture a user-selected rectangular area from the primary monitor.
+///
+/// Coordinates are relative to the monitor origin (top-left).
 #[tauri::command]
 pub async fn capture_area(
     state: State<'_, Mutex<CaptureState>>,
-    _x: i32,
-    _y: i32,
-    _width: i32,
-    _height: i32,
-) -> Result<String, String> {
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+) -> Result<CaptureResult, String> {
     let _guard = state.lock().map_err(|e| e.to_string())?;
-    // TODO: implement DXGI area capture
-    Ok("area_capture_stub".into())
+    platform::capture_rect(0, x, y, width as u32, height as u32)
+}
+
+// ---------------------------------------------------------------------------
+// Platform-specific implementations
+// ---------------------------------------------------------------------------
+
+#[cfg(target_os = "windows")]
+mod platform {
+    use super::CaptureResult;
+    use base64::Engine as _;
+    use std::mem;
+    use windows::core::{Interface, GUID};
+    use windows::Win32::Graphics::Direct3D::D3D_DRIVER_TYPE_HARDWARE;
+    use windows::Win32::Graphics::Direct3D11::{
+        D3D11CreateDevice, ID3D11Device, ID3D11DeviceContext, ID3D11Resource,
+        ID3D11Texture2D, D3D11_BIND_FLAG, D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+        D3D11_MAP_READ, D3D11_MAPPED_SUBRESOURCE, D3D11_SDK_VERSION,
+        D3D11_TEXTURE2D_DESC,
+    };
+    use windows::Win32::Graphics::Dxgi::{
+        CreateDXGIFactory1, IDXGIFactory1, IDXGIAdapter1, IDXGIOutput,
+        IDXGIOutput1, IDXGIOutputDuplication, IDXGIResource,
+        DXGI_ERROR_WAIT_TIMEOUT, DXGI_FORMAT_B8G8R8A8_UNORM,
+        DXGI_OUTDUPL_DESC, DXGI_OUTDUPL_FRAME_INFO,
+    };
+    use windows::Win32::Graphics::Dxgi::Common::{
+        DXGI_ADAPTER_DESC1, DXGI_FORMAT, DXGI_MODE_DESC,
+        DXGI_OUTPUT_DESC,
+    };
+
+    // -- helpers ---------------------------------------------------------
+
+    fn bgra_to_rgba(bgra: &[u8]) -> Vec<u8> {
+        let mut rgba = Vec::with_capacity(bgra.len());
+        for chunk in bgra.chunks_exact(4) {
+            rgba.push(chunk[2]); // R ← B
+            rgba.push(chunk[1]); // G ← G
+            rgba.push(chunk[0]); // B ← R
+            rgba.push(chunk[3]); // A ← A
+        }
+        rgba
+    }
+
+    /// Create a D3D11 device + immediate context.
+    fn create_device() -> Result<(ID3D11Device, ID3D11DeviceContext), String> {
+        let mut device: Option<ID3D11Device> = None;
+        let mut context: Option<ID3D11DeviceContext> = None;
+
+        let feature_levels = [];
+        let flags = D3D11_CREATE_DEVICE_BGRA_SUPPORT;
+
+        unsafe {
+            D3D11CreateDevice(
+                None,                                  // default adapter
+                D3D_DRIVER_TYPE_HARDWARE,
+                None,                                  // no software module
+                flags,
+                &feature_levels,
+                D3D11_SDK_VERSION as u32,
+                Some(&mut device),
+                None,                                  // feature level out
+                Some(&mut context),
+            )
+        }
+        .map_err(|e| format!("D3D11CreateDevice failed: {e}"))?;
+
+        let device = device.ok_or("D3D11 device is null")?;
+        let context = context.ok_or("D3D11 context is null")?;
+        Ok((device, context))
+    }
+
+    /// Get the output (monitor) at `monitor_index`.
+    fn get_output(factory: &IDXGIFactory1, monitor_index: u32) -> Result<(IDXGIOutput1, DXGI_OUTPUT_DESC), String> {
+        unsafe {
+            let adapter: IDXGIAdapter1 = factory
+                .EnumAdapters1(monitor_index)
+                .map_err(|e| format!("EnumAdapters1({monitor_index}) failed: {e}"))?;
+
+            let output: IDXGIOutput = adapter
+                .EnumOutputs(0)
+                .map_err(|e| format!("EnumOutputs failed: {e}"))?;
+
+            let desc = output.GetDesc().map_err(|e| format!("GetDesc failed: {e}"))?;
+
+            let output1: IDXGIOutput1 = output
+                .cast()
+                .map_err(|e| format!("Cast to IDXGIOutput1 failed: {e}"))?;
+
+            Ok((output1, desc))
+        }
+    }
+
+    /// Build the duplication object for the given output.
+    fn duplicate_output(
+        output1: &IDXGIOutput1,
+        device: &ID3D11Device,
+    ) -> Result<IDXGIOutputDuplication, String> {
+        unsafe {
+            output1
+                .DuplicateOutput(device)
+                .map_err(|e| format!("DuplicateOutput failed: {e}"))
+        }
+    }
+
+    /// Acquire one frame and copy its BGRA pixels into a Vec<u8>.
+    /// Returns `(width, height, bgra_bytes, stride)`.
+    fn acquire_frame(
+        dupl: &IDXGIOutputDuplication,
+        device: &ID3D11Device,
+        context: &ID3D11DeviceContext,
+    ) -> Result<(u32, u32, Vec<u8>), String> {
+        unsafe {
+            let mut info = DXGI_OUTDUPL_FRAME_INFO::default();
+            let mut resource: Option<IDXGIResource> = None;
+
+            loop {
+                let hr = dupl.AcquireNextFrame(1000, &mut info, &mut resource);
+                if hr == DXGI_ERROR_WAIT_TIMEOUT {
+                    return Err("timeout acquiring next frame — screen may be locked or no updates".into());
+                }
+                hr.map_err(|e| format!("AcquireNextFrame failed: {e}"))?;
+                break;
+            }
+
+            let resource = resource.ok_or("AcquireNextFrame returned null resource")?;
+
+            let tex: ID3D11Texture2D = resource
+                .cast()
+                .map_err(|e| format!("Cast resource to texture failed: {e}"))?;
+
+            let mut tex_desc = D3D11_TEXTURE2D_DESC::default();
+            tex.GetDesc(&mut tex_desc);
+
+            let width = tex_desc.Width;
+            let height = tex_desc.Height;
+
+            // Create a staging texture for CPU read-back
+            let mut staging_desc = tex_desc;
+            staging_desc.Usage = windows::Win32::Graphics::Direct3D11::D3D11_USAGE_STAGING;
+            staging_desc.BindFlags = D3D11_BIND_FLAG(0);
+            staging_desc.CPUAccessFlags = windows::Win32::Graphics::Direct3D11::D3D11_CPU_ACCESS_READ;
+            staging_desc.MiscFlags = 0;
+
+            let staging_tex = {
+                let mut tex: Option<ID3D11Texture2D> = None;
+                device
+                    .CreateTexture2D(&staging_desc, None, Some(&mut tex))
+                    .map_err(|e| format!("CreateTexture2D (staging) failed: {e}"))?;
+                tex.ok_or("CreateTexture2D returned null")?
+            };
+
+            context.CopyResource(&staging_tex, &tex);
+
+            // Map the staging texture
+            let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
+            context
+                .Map(&staging_tex, 0, D3D11_MAP_READ, 0, Some(&mut mapped))
+                .map_err(|e| format!("Map failed: {e}"))?;
+
+            let row_pitch = mapped.RowPitch as usize;
+            let data_ptr = mapped.pData as *const u8;
+
+            // Copy row by row, respecting stride
+            let row_bytes = (width as usize) * 4;
+            let mut pixels = Vec::with_capacity((width * height * 4) as usize);
+
+            for row in 0..(height as usize) {
+                let src = data_ptr.add(row * row_pitch);
+                let row_slice = std::slice::from_raw_parts(src, row_bytes);
+                pixels.extend_from_slice(row_slice);
+            }
+
+            context.Unmap(&staging_tex, 0);
+
+            // Release frame
+            dupl.ReleaseFrame().map_err(|e| format!("ReleaseFrame failed: {e}"))?;
+
+            // Drop staging_texture here so it is freed before dupl
+            drop(staging_tex);
+
+            Ok((width, height, pixels))
+        }
+    }
+
+    // -- public entry points ---------------------------------------------
+
+    pub fn capture_monitor(monitor_index: u32) -> Result<CaptureResult, String> {
+        unsafe {
+            let factory: IDXGIFactory1 =
+                CreateDXGIFactory1().map_err(|e| format!("CreateDXGIFactory1 failed: {e}"))?;
+
+            let (output1, _desc) = get_output(&factory, monitor_index)?;
+            let (device, context) = create_device()?;
+            let dupl = duplicate_output(&output1, &device)?;
+
+            let (width, height, bgra) =
+                acquire_frame(&dupl, &device, &context)?;
+
+            let rgba = bgra_to_rgba(&bgra);
+            let data = base64::engine::general_purpose::STANDARD.encode(&rgba);
+
+            Ok(CaptureResult {
+                width,
+                height,
+                data,
+            })
+        }
+    }
+
+    pub fn capture_rect(
+        monitor_index: u32,
+        x: i32,
+        y: i32,
+        w: u32,
+        h: u32,
+    ) -> Result<CaptureResult, String> {
+        let full = capture_monitor(monitor_index)?;
+
+        let rx = x.max(0) as u32;
+        let ry = y.max(0) as u32;
+        let rw = w.min(full.width.saturating_sub(rx));
+        let rh = h.min(full.height.saturating_sub(ry));
+
+        if rw == 0 || rh == 0 {
+            return Err("capture rectangle is empty or out of bounds".into());
+        }
+
+        let rgba = base64::engine::general_purpose::STANDARD
+            .decode(&full.data)
+            .map_err(|e| format!("base64 decode failed: {e}"))?;
+
+        // Crop from full image (row-major RGBA)
+        let mut cropped = Vec::with_capacity((rw * rh * 4) as usize);
+        let full_row_bytes = (full.width * 4) as usize;
+        for row in ry..(ry + rh) {
+            let start = (row * full.width * 4 + rx * 4) as usize;
+            let end = start + (rw * 4) as usize;
+            cropped.extend_from_slice(&rgba[start..end]);
+        }
+
+        let data = base64::engine::general_purpose::STANDARD.encode(&cropped);
+
+        Ok(CaptureResult {
+            width: rw,
+            height: rh,
+            data,
+        })
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Non-Windows stub — build must succeed on Linux
+// ---------------------------------------------------------------------------
+
+#[cfg(not(target_os = "windows"))]
+mod platform {
+    use super::CaptureResult;
+
+    pub fn capture_monitor(_monitor_index: u32) -> Result<CaptureResult, String> {
+        Err("screen capture is only supported on Windows".into())
+    }
+
+    pub fn capture_rect(
+        _monitor_index: u32,
+        _x: i32,
+        _y: i32,
+        _w: u32,
+        _h: u32,
+    ) -> Result<CaptureResult, String> {
+        Err("screen capture is only supported on Windows".into())
+    }
 }

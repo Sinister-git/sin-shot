@@ -16,6 +16,23 @@ pub fn run() {
         .manage(std::sync::Mutex::new(ClipboardState::new()))
         .manage(std::sync::Mutex::new(HotkeyState::new()))
         .manage(std::sync::Mutex::new(UploadState::new()))
+        .setup(|app| {
+            // Initialise the platform hotkey thread (Windows) / no-op (Linux).
+            hotkeys::init_hotkey_system();
+
+            // Register default global shortcuts.
+            // Ctrl+Shift+1 → full-monitor capture
+            // Ctrl+Shift+2 → area-select capture
+            let handle = app.handle().clone();
+            hotkeys::store_app_handle(handle.clone());
+
+            // We cannot call async Tauri commands from setup directly, so we
+            // invoke the platform register helpers directly with the AppHandle.
+            let _ = hotkeys::register_hotkey_platform("Ctrl+Shift+1", handle.clone());
+            let _ = hotkeys::register_hotkey_platform("Ctrl+Shift+2", handle);
+
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             capture::capture_full_screen,
             capture::capture_area,
