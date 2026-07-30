@@ -2,7 +2,7 @@ use axum::{
     extract::{ConnectInfo, Multipart, Path, State},
     http::{header, Method, StatusCode},
     response::{IntoResponse, Json, Response},
-    routing::{delete, get, post},
+    routing::{delete, get, get_service, post},
     Router,
 };
 use chrono::{DateTime, Utc};
@@ -18,6 +18,7 @@ use tokio::{fs, sync::Mutex};
 use tower_http::{
     cors::{AllowOrigin, CorsLayer},
     limit::RequestBodyLimitLayer,
+    services::{ServeDir, ServeFile},
 };
 
 // ── Config ──────────────────────────────────────────────────────────
@@ -29,6 +30,7 @@ struct Config {
     max_file_size: usize, // bytes
     base_url: String,
     google_client_id: String,
+    static_dir: PathBuf,
 }
 
 fn load_config() -> Config {
@@ -50,6 +52,9 @@ fn load_config() -> Config {
             .trim_end_matches('/')
             .to_string(),
         google_client_id: std::env::var("GOOGLE_CLIENT_ID").unwrap_or_default(),
+        static_dir: std::env::var("STATIC_DIR")
+            .unwrap_or_else(|_| "./gallery-web/build".into())
+            .into(),
     }
 }
 
@@ -602,12 +607,23 @@ async fn main() {
             header::ACCEPT,
         ]);
 
+    let favicon_path = config.static_dir.join("favicon.png");
+    let index_path = config.static_dir.join("index.html");
+    let static_dir = config.static_dir.clone();
+
     let app = Router::new()
         .route("/api/upload", post(handle_upload))
         .route("/api/gallery", get(handle_gallery))
         .route("/api/image/{key}", delete(handle_delete))
-        .route("/{key}", get(handle_serve))
+        // Static assets — must be before /{key} to avoid conflicting with image keys
+        .route("/favicon.png", get_service(ServeFile::new(favicon_path)))
+        // Image serving routes
         .route("/x/{key}", get(handle_serve))
+        .route("/{key}", get(handle_serve))
+        // Fallback: static files from gallery-web build, then index.html for SPA routing
+        .fallback_service(
+            ServeDir::new(static_dir).fallback(ServeFile::new(index_path)),
+        )
         .layer(cors)
         .layer(RequestBodyLimitLayer::new(
             config.max_file_size + 1024 * 1024,
@@ -621,6 +637,7 @@ async fn main() {
         config.storage_dir.display(),
         config.max_file_size / (1024 * 1024)
     );
+    tracing::info!("Static files: {}", config.static_dir.display());
     if !config.google_client_id.is_empty() {
         tracing::info!("Google auth enabled (client ID configured)");
     } else {
