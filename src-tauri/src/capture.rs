@@ -350,8 +350,7 @@ mod platform {
                             .cast()
                             .map_err(|e| format!("Cast to IDXGIOutput1 failed: {e}"))?;
                         let dupl = duplicate_output(&output1, &device)?;
-                        let (width, height, bgra) =
-                            acquire_frame(&dupl, &device, &context)?;
+                        let (width, height, bgra) = acquire_frame(&dupl, &device, &context)?;
                         let rgba = bgra_to_rgba(&bgra);
 
                         let left = desc.DesktopCoordinates.left;
@@ -379,8 +378,7 @@ mod platform {
             let desktop_h = (max_y - min_y) as u32;
 
             // Stitch all captured monitor images into one virtual-desktop image.
-            let mut desktop =
-                vec![0u8; (desktop_w * desktop_h * 4) as usize];
+            let mut desktop = vec![0u8; (desktop_w * desktop_h * 4) as usize];
 
             for (left, top, width, height, rgba) in &captures {
                 let dst_x = (*left - min_x) as u32;
@@ -389,17 +387,20 @@ mod platform {
                 for row in 0..*height {
                     let src_start = (row * width * 4) as usize;
                     let src_end = src_start + (*width * 4) as usize;
-                    let dst_start =
-                        ((dst_y + row) * desktop_w * 4 + dst_x * 4) as usize;
+                    let dst_start = ((dst_y + row) * desktop_w * 4 + dst_x * 4) as usize;
                     let dst_end = dst_start + (*width * 4) as usize;
                     if dst_end <= desktop.len() {
-                        desktop[dst_start..dst_end]
-                            .copy_from_slice(&rgba[src_start..src_end]);
+                        desktop[dst_start..dst_end].copy_from_slice(&rgba[src_start..src_end]);
                     } else {
                         eprintln!(
                             "capture_desktop_rect: skipping row {} for monitor at ({},{}): \
                              texture width ({}) exceeds desktop bounds (dst_end {} > desktop {})",
-                            row, left, top, width, dst_end, desktop.len()
+                            row,
+                            left,
+                            top,
+                            width,
+                            dst_end,
+                            desktop.len()
                         );
                     }
                 }
@@ -412,22 +413,17 @@ mod platform {
             let crop_h = capture_h.min(desktop_h.saturating_sub(crop_y));
 
             if crop_w == 0 || crop_h == 0 {
-                return Err(
-                    "capture rectangle is empty or out of bounds".into(),
-                );
+                return Err("capture rectangle is empty or out of bounds".into());
             }
 
-            let mut cropped =
-                Vec::with_capacity((crop_w * crop_h * 4) as usize);
+            let mut cropped = Vec::with_capacity((crop_w * crop_h * 4) as usize);
             for row in crop_y..(crop_y + crop_h) {
-                let start =
-                    (row * desktop_w * 4 + crop_x * 4) as usize;
+                let start = (row * desktop_w * 4 + crop_x * 4) as usize;
                 let end = start + (crop_w * 4) as usize;
                 cropped.extend_from_slice(&desktop[start..end]);
             }
 
-            let data =
-                base64::engine::general_purpose::STANDARD.encode(&cropped);
+            let data = base64::engine::general_purpose::STANDARD.encode(&cropped);
 
             Ok(CaptureResult {
                 width: crop_w,

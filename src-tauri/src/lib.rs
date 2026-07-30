@@ -51,10 +51,8 @@ pub fn run() {
             }
 
             // Build system tray with Settings & Quit menu items
-            let settings_item = MenuItemBuilder::with_id("settings", "Settings")
-                .build(app)?;
-            let quit_item = MenuItemBuilder::with_id("quit", "Quit")
-                .build(app)?;
+            let settings_item = MenuItemBuilder::with_id("settings", "Settings").build(app)?;
+            let quit_item = MenuItemBuilder::with_id("quit", "Quit").build(app)?;
             let tray_menu = MenuBuilder::new(app)
                 .item(&settings_item)
                 .separator()

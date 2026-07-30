@@ -69,10 +69,7 @@ pub async fn start_capture(app: AppHandle, mode: String) -> Result<(), String> {
 
     // Resize and reposition the window to cover the entire monitor space.
     window
-        .set_position(Position::Physical(PhysicalPosition {
-            x: min_x,
-            y: min_y,
-        }))
+        .set_position(Position::Physical(PhysicalPosition { x: min_x, y: min_y }))
         .map_err(|e| format!("set_position: {e}"))?;
 
     window
@@ -84,9 +81,7 @@ pub async fn start_capture(app: AppHandle, mode: String) -> Result<(), String> {
 
     // Bring the window to the foreground and show it.
     window.show().map_err(|e| format!("show: {e}"))?;
-    window
-        .set_focus()
-        .map_err(|e| format!("set_focus: {e}"))?;
+    window.set_focus().map_err(|e| format!("set_focus: {e}"))?;
 
     // Notify the frontend which mode to display.
     window
@@ -153,7 +148,10 @@ pub async fn get_monitors(app: AppHandle) -> Result<Vec<MonitorInfo>, String> {
             pp.x == pos.x && pp.y == pos.y && ps.width == size.width && ps.height == size.height
         });
         result.push(MonitorInfo {
-            name: m.name().map(|s| s.to_string()).unwrap_or_else(|| "Unknown".to_string()),
+            name: m
+                .name()
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| "Unknown".to_string()),
             width: size.width,
             height: size.height,
             x: pos.x,
