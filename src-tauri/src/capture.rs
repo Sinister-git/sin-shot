@@ -7,6 +7,7 @@
 use tauri::State;
 use std::sync::Mutex;
 
+#[allow(dead_code)]
 pub struct CaptureState {
     /// Placeholder for DXGI output duplication state.
     pub initialized: bool,

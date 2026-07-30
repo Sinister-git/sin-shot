@@ -3,4 +3,4 @@
   // Renders on top of all other windows, captures mouse events for region drag.
 </script>
 
-<div class="overlay" />
+<div class="overlay"></div>

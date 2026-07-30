@@ -3,4 +3,4 @@
   // Supports arrows, text, rectangles, and freehand drawing post-capture.
 </script>
 
-<canvas class="annotation-canvas" />
+<canvas class="annotation-canvas"></canvas>

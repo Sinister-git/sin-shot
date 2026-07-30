@@ -3,4 +3,4 @@
   // Renders below or over the captured screenshot.
 </script>
 
-<div class="action-bar" role="toolbar" aria-label="Capture actions" />
+<div class="action-bar" role="toolbar" aria-label="Capture actions"></div>

@@ -3,4 +3,4 @@
   // Displayed above the annotation canvas post-capture.
 </script>
 
-<nav class="toolbar" aria-label="Annotation tools" />
+<nav class="toolbar" aria-label="Annotation tools"></nav>

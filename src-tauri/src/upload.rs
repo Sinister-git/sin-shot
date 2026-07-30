@@ -6,6 +6,7 @@
 use tauri::State;
 use std::sync::Mutex;
 
+#[allow(dead_code)]
 pub struct UploadState {
     pub endpoint: String,
     pub last_upload_url: Option<String>,
