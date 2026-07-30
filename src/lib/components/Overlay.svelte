@@ -145,7 +145,12 @@
       flowState = 'idle';
     });
 
-    unlisteners = [u1, u2, u3];
+    const u4 = await listen<{ hotkey_full: string; hotkey_area: string }>('settings-changed', (event) => {
+      hotkeyFull = event.payload.hotkey_full;
+      hotkeyArea = event.payload.hotkey_area;
+    });
+
+    unlisteners = [u1, u2, u3, u4];
   }
 
   function cleanupListeners() {

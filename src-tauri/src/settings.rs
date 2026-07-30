@@ -5,7 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::hotkeys::{self, HotkeyState};
 
@@ -212,6 +212,14 @@ pub async fn save_settings(
             }
         }
     }
+
+    let _ = app.emit(
+        "settings-changed",
+        serde_json::json!({
+            "hotkey_full": settings.hotkey_full,
+            "hotkey_area": settings.hotkey_area,
+        }),
+    );
 
     Ok(())
 }
