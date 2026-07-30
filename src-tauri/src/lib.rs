@@ -1,6 +1,7 @@
 mod capture;
 mod clipboard;
 mod hotkeys;
+mod overlay;
 mod settings;
 mod upload;
 
@@ -84,6 +85,9 @@ pub fn run() {
             clipboard::read_from_clipboard,
             hotkeys::register_hotkey,
             hotkeys::unregister_hotkey,
+            overlay::start_capture,
+            overlay::cancel_capture,
+            overlay::get_monitors,
             settings::get_settings,
             settings::save_settings,
             settings::get_hotkeys,
