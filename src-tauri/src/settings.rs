@@ -71,11 +71,16 @@ fn dirs_fallback_pictures() -> String {
 // ---------------------------------------------------------------------------
 
 fn settings_path(app: &AppHandle) -> Result<PathBuf, String> {
-    let dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("app_data_dir failed: {e}"))?;
-    std::fs::create_dir_all(&dir).map_err(|e| format!("create_dir_all failed: {e}"))?;
+    let dir = app.path().app_data_dir().map_err(|e| {
+        let msg = format!("app_data_dir failed: {e}");
+        tracing::error!("{}", msg);
+        msg
+    })?;
+    std::fs::create_dir_all(&dir).map_err(|e| {
+        let msg = format!("create_dir_all for settings dir failed: {e}");
+        tracing::error!("{}", msg);
+        msg
+    })?;
     Ok(dir.join("settings.json"))
 }
 
@@ -86,8 +91,17 @@ fn settings_path(app: &AppHandle) -> Result<PathBuf, String> {
 pub fn load_settings_sync(app: &AppHandle) -> Settings {
     match settings_path(app) {
         Ok(path) if path.exists() => match std::fs::read_to_string(&path) {
-            Ok(raw) => serde_json::from_str(&raw).unwrap_or_default(),
-            Err(_) => Settings::default(),
+            Ok(raw) => match serde_json::from_str(&raw) {
+                Ok(s) => s,
+                Err(e) => {
+                    tracing::error!("Failed to parse settings file: {}", e);
+                    Settings::default()
+                }
+            },
+            Err(e) => {
+                tracing::error!("Failed to read settings file: {}", e);
+                Settings::default()
+            }
         },
         _ => Settings::default(),
     }
@@ -102,8 +116,16 @@ pub fn load_settings_sync(app: &AppHandle) -> Settings {
 pub async fn get_settings(app: AppHandle) -> Result<Settings, String> {
     let path = settings_path(&app)?;
     if path.exists() {
-        let raw = std::fs::read_to_string(&path).map_err(|e| format!("read settings file: {e}"))?;
-        serde_json::from_str(&raw).map_err(|e| format!("parse settings: {e}"))
+        let raw = std::fs::read_to_string(&path).map_err(|e| {
+            let msg = format!("read settings file: {e}");
+            tracing::error!("{}", msg);
+            msg
+        })?;
+        serde_json::from_str(&raw).map_err(|e| {
+            let msg = format!("parse settings: {e}");
+            tracing::error!("{}", msg);
+            msg
+        })
     } else {
         Ok(Settings::default())
     }
@@ -121,9 +143,17 @@ pub async fn save_settings(
 
     settings.jpeg_quality = settings.jpeg_quality.clamp(60, 100);
     let path = settings_path(&app)?;
-    let raw =
-        serde_json::to_string_pretty(&settings).map_err(|e| format!("serialize settings: {e}"))?;
-    std::fs::write(&path, raw).map_err(|e| format!("write settings file: {e}"))?;
+    let raw = serde_json::to_string_pretty(&settings).map_err(|e| {
+        let msg = format!("serialize settings: {e}");
+        tracing::error!("{}", msg);
+        msg
+    })?;
+    std::fs::write(&path, raw).map_err(|e| {
+        let msg = format!("write settings file: {e}");
+        tracing::error!("{}", msg);
+        msg
+    })?;
+    tracing::info!("Settings saved to {}", path.display());
 
     // If hotkey combos changed, unregister the old and register the new
     if old_settings.hotkey_full != settings.hotkey_full {
@@ -138,8 +168,8 @@ pub async fn save_settings(
                 }
             }
             Err(e) => {
-                tracing::warn!(
-                    "Failed to register hotkey '{}': {}",
+                tracing::error!(
+                    "Failed to register hotkey '{}' after settings save: {}",
                     settings.hotkey_full,
                     e
                 );
@@ -159,8 +189,8 @@ pub async fn save_settings(
                 }
             }
             Err(e) => {
-                tracing::warn!(
-                    "Failed to register hotkey '{}': {}",
+                tracing::error!(
+                    "Failed to register hotkey '{}' after settings save: {}",
                     settings.hotkey_area,
                     e
                 );
@@ -176,7 +206,11 @@ pub async fn save_settings(
 pub async fn get_hotkeys(
     state: State<'_, std::sync::Mutex<HotkeyState>>,
 ) -> Result<Vec<String>, String> {
-    let guard = state.lock().map_err(|e| e.to_string())?;
+    let guard = state.lock().map_err(|e| {
+        let msg = e.to_string();
+        tracing::error!("get_hotkeys: {}", msg);
+        msg
+    })?;
     Ok(guard.hotkeys_registered.clone())
 }
 
@@ -184,10 +218,16 @@ pub async fn get_hotkeys(
 #[tauri::command]
 pub async fn show_settings(app: AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("settings") {
-        window.show().map_err(|e| format!("show settings: {e}"))?;
-        window
-            .set_focus()
-            .map_err(|e| format!("focus settings: {e}"))?;
+        window.show().map_err(|e| {
+            let msg = format!("show settings: {e}");
+            tracing::error!("{}", msg);
+            msg
+        })?;
+        window.set_focus().map_err(|e| {
+            let msg = format!("focus settings: {e}");
+            tracing::error!("{}", msg);
+            msg
+        })?;
     } else {
         // Build from the config entry with label "settings"
         use tauri::WebviewWindowBuilder;
@@ -197,16 +237,33 @@ pub async fn show_settings(app: AppHandle) -> Result<(), String> {
             .windows
             .iter()
             .find(|w| w.label == "settings")
-            .ok_or("settings window not found in config")?
+            .ok_or_else(|| {
+                tracing::error!("settings window not found in config");
+                "settings window not found in config".to_string()
+            })?
             .clone();
         let window = WebviewWindowBuilder::from_config(&app, &config)
-            .map_err(|e| format!("settings window config: {e}"))?
+            .map_err(|e| {
+                let msg = format!("settings window config: {e}");
+                tracing::error!("{}", msg);
+                msg
+            })?
             .build()
-            .map_err(|e| format!("build settings window: {e}"))?;
-        window.show().map_err(|e| format!("show settings: {e}"))?;
-        window
-            .set_focus()
-            .map_err(|e| format!("focus settings: {e}"))?;
+            .map_err(|e| {
+                let msg = format!("build settings window: {e}");
+                tracing::error!("{}", msg);
+                msg
+            })?;
+        window.show().map_err(|e| {
+            let msg = format!("show settings: {e}");
+            tracing::error!("{}", msg);
+            msg
+        })?;
+        window.set_focus().map_err(|e| {
+            let msg = format!("focus settings: {e}");
+            tracing::error!("{}", msg);
+            msg
+        })?;
     }
     Ok(())
 }

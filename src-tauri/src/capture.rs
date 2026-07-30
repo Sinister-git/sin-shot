@@ -48,8 +48,15 @@ pub async fn capture_full_screen(
     state: State<'_, Mutex<CaptureState>>,
     monitor_name: String,
 ) -> Result<CaptureResult, String> {
-    let _guard = state.lock().map_err(|e| e.to_string())?;
-    platform::capture_monitor(&monitor_name)
+    let _guard = state.lock().map_err(|e| {
+        tracing::error!("Failed to lock capture state: {}", e);
+        e.to_string()
+    })?;
+    tracing::info!("Capturing monitor: {}", monitor_name);
+    platform::capture_monitor(&monitor_name).map_err(|e| {
+        tracing::error!("Capture monitor '{}' failed: {}", monitor_name, e);
+        e
+    })
 }
 
 /// Capture a user-selected rectangular area from the virtual desktop.
@@ -63,8 +70,28 @@ pub async fn capture_area(
     width: i32,
     height: i32,
 ) -> Result<CaptureResult, String> {
-    let _guard = state.lock().map_err(|e| e.to_string())?;
-    platform::capture_desktop_rect(x, y, width as u32, height as u32)
+    let _guard = state.lock().map_err(|e| {
+        tracing::error!("Failed to lock capture state: {}", e);
+        e.to_string()
+    })?;
+    tracing::info!(
+        "Capturing area: x={}, y={}, w={}, h={}",
+        x,
+        y,
+        width,
+        height
+    );
+    platform::capture_desktop_rect(x, y, width as u32, height as u32).map_err(|e| {
+        tracing::error!(
+            "Capture area ({},{},{},{}) failed: {}",
+            x,
+            y,
+            width,
+            height,
+            e
+        );
+        e
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -122,10 +149,20 @@ mod platform {
                 Some(&mut context),
             )
         }
-        .map_err(|e| format!("D3D11CreateDevice failed: {e}"))?;
+        .map_err(|e| {
+            let msg = format!("D3D11CreateDevice failed: {e}");
+            tracing::error!("{}", msg);
+            msg
+        })?;
 
-        let device = device.ok_or("D3D11 device is null")?;
-        let context = context.ok_or("D3D11 context is null")?;
+        let device = device.ok_or_else(|| {
+            tracing::error!("D3D11 device is null");
+            "D3D11 device is null".to_string()
+        })?;
+        let context = context.ok_or_else(|| {
+            tracing::error!("D3D11 context is null");
+            "D3D11 context is null".to_string()
+        })?;
         Ok((device, context))
     }
 
@@ -170,7 +207,11 @@ mod platform {
                 adapter_idx += 1;
             }
         }
-        Err(format!("monitor '{}' not found", monitor_name))
+        {
+            let msg = format!("monitor '{}' not found", monitor_name);
+            tracing::error!("{}", msg);
+            Err(msg)
+        }
     }
 
     /// Build the duplication object for the given output.
@@ -179,9 +220,11 @@ mod platform {
         device: &ID3D11Device,
     ) -> Result<IDXGIOutputDuplication, String> {
         unsafe {
-            output1
-                .DuplicateOutput(device)
-                .map_err(|e| format!("DuplicateOutput failed: {e}"))
+            output1.DuplicateOutput(device).map_err(|e| {
+                let msg = format!("DuplicateOutput failed: {e}");
+                tracing::error!("{}", msg);
+                msg
+            })
         }
     }
 
@@ -198,19 +241,30 @@ mod platform {
             let result = dupl.AcquireNextFrame(1000, &mut info, &mut resource);
             if let Err(ref e) = result {
                 if e.code() == DXGI_ERROR_WAIT_TIMEOUT {
+                    tracing::error!("AcquireNextFrame timed out — screen may be locked");
                     return Err(
                         "timeout acquiring next frame — screen may be locked or no updates".into(),
                     );
                 }
             }
-            result.map_err(|e| format!("AcquireNextFrame failed: {e}"))?;
+            result.map_err(|e| {
+                let msg = format!("AcquireNextFrame failed: {e}");
+                tracing::error!("{}", msg);
+                msg
+            })?;
 
-            let resource = resource.ok_or("AcquireNextFrame returned null resource")?;
+            let resource = resource.ok_or_else(|| {
+                tracing::error!("AcquireNextFrame returned null resource");
+                "AcquireNextFrame returned null resource".to_string()
+            })?;
 
             let result = process_acquired_frame(device, context, &resource);
 
-            dupl.ReleaseFrame()
-                .map_err(|e| format!("ReleaseFrame failed: {e}"))?;
+            dupl.ReleaseFrame().map_err(|e| {
+                let msg = format!("ReleaseFrame failed: {e}");
+                tracing::error!("{}", msg);
+                msg
+            })?;
 
             result
         }
@@ -223,9 +277,11 @@ mod platform {
         context: &ID3D11DeviceContext,
         resource: &IDXGIResource,
     ) -> Result<(u32, u32, Vec<u8>), String> {
-        let tex: ID3D11Texture2D = resource
-            .cast()
-            .map_err(|e| format!("Cast resource to texture failed: {e}"))?;
+        let tex: ID3D11Texture2D = resource.cast().map_err(|e| {
+            let msg = format!("Cast resource to texture failed: {e}");
+            tracing::error!("{}", msg);
+            msg
+        })?;
 
         let mut tex_desc = D3D11_TEXTURE2D_DESC::default();
         tex.GetDesc(&mut tex_desc);
@@ -245,8 +301,15 @@ mod platform {
             let mut tex: Option<ID3D11Texture2D> = None;
             device
                 .CreateTexture2D(&staging_desc, None, Some(&mut tex))
-                .map_err(|e| format!("CreateTexture2D (staging) failed: {e}"))?;
-            tex.ok_or("CreateTexture2D returned null")?
+                .map_err(|e| {
+                    let msg = format!("CreateTexture2D (staging) failed: {e}");
+                    tracing::error!("{}", msg);
+                    msg
+                })?;
+            tex.ok_or_else(|| {
+                tracing::error!("CreateTexture2D returned null");
+                "CreateTexture2D returned null".to_string()
+            })?;
         };
 
         context.CopyResource(&staging_tex, &tex);
@@ -255,7 +318,11 @@ mod platform {
         let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
         context
             .Map(&staging_tex, 0, D3D11_MAP_READ, 0, Some(&mut mapped))
-            .map_err(|e| format!("Map failed: {e}"))?;
+            .map_err(|e| {
+                let msg = format!("Map failed: {e}");
+                tracing::error!("{}", msg);
+                msg
+            })?;
 
         let row_pitch = mapped.RowPitch as usize;
         let data_ptr = mapped.pData as *const u8;
@@ -292,8 +359,11 @@ mod platform {
     /// Internal helper: capture the full monitor and return raw RGBA pixels.
     fn capture_monitor_rgba(monitor_name: &str) -> Result<(u32, u32, Vec<u8>), String> {
         unsafe {
-            let factory: IDXGIFactory1 =
-                CreateDXGIFactory1().map_err(|e| format!("CreateDXGIFactory1 failed: {e}"))?;
+            let factory: IDXGIFactory1 = CreateDXGIFactory1().map_err(|e| {
+                let msg = format!("CreateDXGIFactory1 failed: {e}");
+                tracing::error!("{}", msg);
+                msg
+            })?;
 
             let (output1, _desc) = get_output_by_name(&factory, monitor_name)?;
             let (device, context) = create_device()?;
@@ -316,12 +386,16 @@ mod platform {
         capture_h: u32,
     ) -> Result<CaptureResult, String> {
         if capture_w == 0 || capture_h == 0 {
+            tracing::error!("Capture rectangle is empty: {}x{}", capture_w, capture_h);
             return Err("capture rectangle is empty".into());
         }
 
         unsafe {
-            let factory: IDXGIFactory1 =
-                CreateDXGIFactory1().map_err(|e| format!("CreateDXGIFactory1 failed: {e}"))?;
+            let factory: IDXGIFactory1 = CreateDXGIFactory1().map_err(|e| {
+                let msg = format!("CreateDXGIFactory1 failed: {e}");
+                tracing::error!("{}", msg);
+                msg
+            })?;
 
             // Create one D3D11 device reused for all monitor captures.
             let (device, context) = create_device()?;
@@ -374,6 +448,7 @@ mod platform {
             }
 
             if captures.is_empty() {
+                tracing::error!("No attached monitors found during area capture");
                 return Err("no attached monitors found".into());
             }
 
@@ -395,7 +470,7 @@ mod platform {
                     if dst_end <= desktop.len() {
                         desktop[dst_start..dst_end].copy_from_slice(&rgba[src_start..src_end]);
                     } else {
-                        eprintln!(
+                        tracing::warn!(
                             "capture_desktop_rect: skipping row {} for monitor at ({},{}): \
                              texture width ({}) exceeds desktop bounds (dst_end {} > desktop {})",
                             row,
@@ -416,6 +491,13 @@ mod platform {
             let crop_h = capture_h.min(desktop_h.saturating_sub(crop_y));
 
             if crop_w == 0 || crop_h == 0 {
+                tracing::error!(
+                    "Capture rectangle out of bounds: crop_w={}, crop_h={}, desktop={}x{}",
+                    crop_w,
+                    crop_h,
+                    desktop_w,
+                    desktop_h
+                );
                 return Err("capture rectangle is empty or out of bounds".into());
             }
 

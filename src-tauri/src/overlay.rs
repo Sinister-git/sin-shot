@@ -39,14 +39,18 @@ pub struct MonitorInfo {
 /// the appropriate overlay UI.
 #[tauri::command]
 pub async fn start_capture(app: AppHandle, mode: String) -> Result<(), String> {
+    tracing::info!("Starting capture mode: {}", mode);
     let window = get_main_window(&app)?;
 
     // Compute the bounding box that encompasses all monitors.
-    let monitors = window
-        .available_monitors()
-        .map_err(|e| format!("failed to enumerate monitors: {e}"))?;
+    let monitors = window.available_monitors().map_err(|e| {
+        let msg = format!("failed to enumerate monitors: {e}");
+        tracing::error!("{}", msg);
+        msg
+    })?;
 
     if monitors.is_empty() {
+        tracing::error!("No monitors available for capture");
         return Err("no monitors available".into());
     }
 
@@ -70,23 +74,43 @@ pub async fn start_capture(app: AppHandle, mode: String) -> Result<(), String> {
     // Resize and reposition the window to cover the entire monitor space.
     window
         .set_position(Position::Physical(PhysicalPosition { x: min_x, y: min_y }))
-        .map_err(|e| format!("set_position: {e}"))?;
+        .map_err(|e| {
+            let msg = format!("set_position: {e}");
+            tracing::error!("{}", msg);
+            msg
+        })?;
 
     window
         .set_size(Size::Physical(PhysicalSize {
             width: total_width,
             height: total_height,
         }))
-        .map_err(|e| format!("set_size: {e}"))?;
+        .map_err(|e| {
+            let msg = format!("set_size: {e}");
+            tracing::error!("{}", msg);
+            msg
+        })?;
 
     // Bring the window to the foreground and show it.
-    window.show().map_err(|e| format!("show: {e}"))?;
-    window.set_focus().map_err(|e| format!("set_focus: {e}"))?;
+    window.show().map_err(|e| {
+        let msg = format!("show: {e}");
+        tracing::error!("{}", msg);
+        msg
+    })?;
+    window.set_focus().map_err(|e| {
+        let msg = format!("set_focus: {e}");
+        tracing::error!("{}", msg);
+        msg
+    })?;
 
     // Notify the frontend which mode to display.
     window
         .emit("capture-mode-started", serde_json::json!({ "mode": mode }))
-        .map_err(|e| format!("emit: {e}"))?;
+        .map_err(|e| {
+            let msg = format!("emit capture-mode-started: {e}");
+            tracing::error!("{}", msg);
+            msg
+        })?;
 
     Ok(())
 }
@@ -96,7 +120,11 @@ pub async fn start_capture(app: AppHandle, mode: String) -> Result<(), String> {
 pub async fn cancel_capture(app: AppHandle) -> Result<(), String> {
     let window = get_main_window(&app)?;
 
-    window.hide().map_err(|e| format!("hide: {e}"))?;
+    window.hide().map_err(|e| {
+        let msg = format!("hide: {e}");
+        tracing::error!("{}", msg);
+        msg
+    })?;
 
     // Reset to default compact dimensions so the next show isn't full-screen.
     window
@@ -104,7 +132,11 @@ pub async fn cancel_capture(app: AppHandle) -> Result<(), String> {
             width: 800,
             height: 600,
         }))
-        .map_err(|e| format!("set_size: {e}"))?;
+        .map_err(|e| {
+            let msg = format!("set_size: {e}");
+            tracing::error!("{}", msg);
+            msg
+        })?;
 
     // Reset position to center on primary monitor.
     if let Ok(Some(pm)) = window.primary_monitor() {
@@ -118,9 +150,11 @@ pub async fn cancel_capture(app: AppHandle) -> Result<(), String> {
         }));
     }
 
-    window
-        .emit("capture-mode-cancelled", ())
-        .map_err(|e| format!("emit: {e}"))?;
+    window.emit("capture-mode-cancelled", ()).map_err(|e| {
+        let msg = format!("emit capture-mode-cancelled: {e}");
+        tracing::error!("{}", msg);
+        msg
+    })?;
 
     Ok(())
 }
@@ -130,13 +164,17 @@ pub async fn cancel_capture(app: AppHandle) -> Result<(), String> {
 pub async fn get_monitors(app: AppHandle) -> Result<Vec<MonitorInfo>, String> {
     let window = get_main_window(&app)?;
 
-    let monitors = window
-        .available_monitors()
-        .map_err(|e| format!("failed to enumerate monitors: {e}"))?;
+    let monitors = window.available_monitors().map_err(|e| {
+        let msg = format!("failed to enumerate monitors: {e}");
+        tracing::error!("{}", msg);
+        msg
+    })?;
 
-    let primary: Option<Monitor> = window
-        .primary_monitor()
-        .map_err(|e| format!("primary_monitor: {e}"))?;
+    let primary: Option<Monitor> = window.primary_monitor().map_err(|e| {
+        let msg = format!("primary_monitor: {e}");
+        tracing::error!("{}", msg);
+        msg
+    })?;
 
     let mut result = Vec::new();
     for m in &monitors {

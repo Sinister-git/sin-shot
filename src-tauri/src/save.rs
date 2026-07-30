@@ -27,12 +27,21 @@ pub async fn save_to_file(
     app: tauri::AppHandle,
     image_data_base64: String,
 ) -> Result<String, String> {
-    let bytes = base64_decode(&image_data_base64)?;
+    let bytes = base64_decode(&image_data_base64).map_err(|e| {
+        tracing::error!("save_to_file: base64 decode failed: {}", e);
+        e
+    })?;
 
-    let pictures = pictures_dir().ok_or("Could not find Pictures directory")?;
+    let pictures = pictures_dir().ok_or_else(|| {
+        tracing::error!("save_to_file: Could not find Pictures directory");
+        "Could not find Pictures directory".to_string()
+    })?;
     let save_dir = pictures.join("Sin Shot");
-    std::fs::create_dir_all(&save_dir)
-        .map_err(|e| format!("Failed to create save directory: {e}"))?;
+    std::fs::create_dir_all(&save_dir).map_err(|e| {
+        let msg = format!("Failed to create save directory: {e}");
+        tracing::error!("{}", msg);
+        msg
+    })?;
 
     let timestamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -41,11 +50,16 @@ pub async fn save_to_file(
     let filename = format!("sin-shot-{}.png", timestamp);
     let path = save_dir.join(&filename);
 
-    std::fs::write(&path, &bytes).map_err(|e| format!("Failed to write file: {e}"))?;
+    std::fs::write(&path, &bytes).map_err(|e| {
+        let msg = format!("Failed to write file: {e}");
+        tracing::error!("{}", msg);
+        msg
+    })?;
 
     let path_str = path.to_string_lossy().to_string();
     let _ = app.emit("screenshot-saved", &path_str);
 
+    tracing::info!("Saved screenshot to {}", path_str);
     Ok(path_str)
 }
 
