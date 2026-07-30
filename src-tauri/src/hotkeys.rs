@@ -88,13 +88,12 @@ pub async fn unregister_hotkey(
 
 #[cfg(target_os = "windows")]
 mod platform {
-    use super::HotkeyEvent;
     use std::collections::HashMap;
     use std::sync::mpsc::{self, Sender};
     use std::sync::{LazyLock, Mutex};
     use std::thread;
-    use tauri::{AppHandle, Emitter};
-    use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
+    use tauri::AppHandle;
+    use windows::Win32::Foundation::{HINSTANCE, HMODULE, HWND, LPARAM, LRESULT, WPARAM};
     use windows::Win32::System::LibraryLoader::GetModuleHandleA;
     use windows::Win32::UI::Input::KeyboardAndMouse::*;
     use windows::Win32::UI::WindowsAndMessaging::*;
@@ -103,14 +102,12 @@ mod platform {
 
     enum ThreadCmd {
         Register {
-            combo: String,
             id: i32,
             modifiers: u32,
             vk: u32,
             result_tx: mpsc::Sender<Result<(), String>>,
         },
         Unregister {
-            combo: String,
             id: i32,
         },
     }
@@ -235,14 +232,15 @@ mod platform {
 
     fn hotkey_thread(rx: mpsc::Receiver<ThreadCmd>) {
         unsafe {
-            let hinstance: HINSTANCE = GetModuleHandleA(None).expect("GetModuleHandleA failed");
+            let hmodule: HMODULE = GetModuleHandleA(None).expect("GetModuleHandleA failed");
+            let hinstance: HINSTANCE = hmodule.into();
 
             // Register a dummy window class
             let class_name = windows::core::s!("SinShotHotkeyClass");
 
             let wc = WNDCLASSA {
                 lpfnWndProc: Some(hotkey_wndproc),
-                hInstance: hinstance.into(),
+                hInstance: hinstance,
                 lpszClassName: class_name,
                 ..Default::default()
             };
@@ -262,47 +260,40 @@ mod platform {
                 0,
                 0,
                 0,
-                HWND_MESSAGE, // message-only
+                Some(HWND_MESSAGE), // message-only
                 None,
-                hinstance,
+                Some(hinstance),
                 None,
-            );
-            if hwnd.0 == 0 {
-                panic!("CreateWindowExA failed");
-            }
+            )
+            .expect("CreateWindowExA failed");
 
             // Main message loop — also checks the channel for commands.
             loop {
                 // Pump Windows messages (non-blocking)
                 let mut msg = MSG::default();
-                while PeekMessageA(&mut msg, hwnd, 0, 0, PM_REMOVE).as_bool() {
+                while PeekMessageA(&mut msg, Some(hwnd), 0, 0, PM_REMOVE).as_bool() {
                     if msg.message == WM_QUIT {
                         return;
                     }
-                    TranslateMessage(&msg);
+                    let _ = TranslateMessage(&msg);
                     DispatchMessageA(&msg);
                 }
 
                 // Check for channel commands
                 match rx.try_recv() {
                     Ok(ThreadCmd::Register {
-                        combo: _,
                         id,
                         modifiers,
                         vk,
                         result_tx,
                     }) => {
-                        let result = RegisterHotKey(
-                            hwnd,
-                            id,
-                            HOT_KEY_MODIFIERS(modifiers as u32),
-                            u32::try_from(vk).unwrap_or(0),
-                        );
+                        let result =
+                            RegisterHotKey(Some(hwnd), id, HOT_KEY_MODIFIERS(modifiers), vk);
                         let _ = result_tx
                             .send(result.map_err(|e| format!("RegisterHotKey failed: {e:?}")));
                     }
-                    Ok(ThreadCmd::Unregister { combo: _, id }) => {
-                        let _ = UnregisterHotKey(hwnd, id);
+                    Ok(ThreadCmd::Unregister { id }) => {
+                        let _ = UnregisterHotKey(Some(hwnd), id);
                     }
                     Err(mpsc::TryRecvError::Disconnected) => break,
                     Err(mpsc::TryRecvError::Empty) => {
@@ -376,7 +367,6 @@ mod platform {
             .ok_or("hotkey thread not initialised — call init() first")?;
 
         tx.send(ThreadCmd::Register {
-            combo: combo.to_string(),
             id,
             modifiers,
             vk,
@@ -407,11 +397,8 @@ mod platform {
         let tx = THREAD_TX.lock().unwrap();
         let tx = tx.as_ref().ok_or("hotkey thread not initialised")?;
 
-        tx.send(ThreadCmd::Unregister {
-            combo: combo.to_string(),
-            id,
-        })
-        .map_err(|e| format!("failed to send unregister command: {e}"))?;
+        tx.send(ThreadCmd::Unregister { id })
+            .map_err(|e| format!("failed to send unregister command: {e}"))?;
 
         COMBO_IDS.lock().unwrap().remove(combo);
 
