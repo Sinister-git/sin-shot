@@ -39,6 +39,14 @@ pub fn run() {
             let r1 = hotkeys::register_hotkey_platform(&persisted.hotkey_full, handle.clone());
             let r2 = hotkeys::register_hotkey_platform(&persisted.hotkey_area, handle);
 
+            // Log registration failures so the user can diagnose conflicts
+            if let Err(ref e) = r1 {
+                tracing::warn!("Failed to register hotkey '{}': {}", persisted.hotkey_full, e);
+            }
+            if let Err(ref e) = r2 {
+                tracing::warn!("Failed to register hotkey '{}': {}", persisted.hotkey_area, e);
+            }
+
             // Sync HotkeyState so the frontend can discover registered hotkeys
             let state = app.state::<std::sync::Mutex<HotkeyState>>();
             if let Ok(mut guard) = state.lock() {

@@ -466,6 +466,13 @@ pub fn register_hotkey_platform(combo: &str, app: tauri::AppHandle) -> Result<()
     platform::register(combo, app)
 }
 
+/// Unregister a hotkey directly (used from settings re-registration and
+/// other contexts outside the Tauri command router).
+/// On non-Windows this is a no-op.
+pub fn unregister_hotkey_platform(combo: &str) -> Result<(), String> {
+    platform::unregister(combo)
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
