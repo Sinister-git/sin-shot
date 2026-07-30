@@ -39,18 +39,6 @@ fn base64_decode(input: &str) -> Result<Vec<u8>, String> {
         .map_err(|e| format!("Base64 decode failed: {e}"))
 }
 
-/// Copy text to the system clipboard.
-#[tauri::command]
-pub async fn copy_text_to_clipboard(
-    state: State<'_, Mutex<ClipboardState>>,
-    text: String,
-) -> Result<(), String> {
-    let mut guard = state.lock().map_err(|e| e.to_string())?;
-    guard.last_clipboard_content = Some(text.clone());
-    // TODO: write text to system clipboard
-    Ok(())
-}
-
 /// Read image bytes from the system clipboard.
 #[tauri::command]
 pub async fn read_from_clipboard(

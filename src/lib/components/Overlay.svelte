@@ -417,9 +417,9 @@
       const shortUrl = url.replace(/\/([^/]+)$/, '/x/$1');
       uploadUrl = shortUrl;
 
-      // Copy the short URL to clipboard via the Tauri clipboard module
+      // Copy the short URL to clipboard
       try {
-        await invoke('copy_text_to_clipboard', { text: shortUrl });
+        await navigator.clipboard.writeText(shortUrl);
       } catch {
         // best-effort URL copy
       }
