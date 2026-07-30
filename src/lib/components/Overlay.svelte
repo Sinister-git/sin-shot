@@ -109,12 +109,28 @@
 
   let unlisteners: UnlistenFn[] = [];
 
+  // Loaded hotkey combos for dynamic comparison
+  let hotkeyFull: string = $state('Ctrl+Shift+1');
+  let hotkeyArea: string = $state('Ctrl+Shift+2');
+
+  async function loadHotkeySettings() {
+    try {
+      const s = await invoke<{ hotkey_full: string; hotkey_area: string }>('get_settings');
+      hotkeyFull = s.hotkey_full;
+      hotkeyArea = s.hotkey_area;
+    } catch {
+      // keep defaults
+    }
+  }
+
   async function setupListeners() {
+    await loadHotkeySettings();
+
     const u1 = await listen<{ combo: string }>('hotkey-pressed', (event) => {
       const combo = event.payload.combo;
-      if (combo === 'Ctrl+Shift+1') {
+      if (combo === hotkeyFull) {
         enterCaptureMode('full-monitor');
-      } else if (combo === 'Ctrl+Shift+2') {
+      } else if (combo === hotkeyArea) {
         enterCaptureMode('area-select');
       }
     });
@@ -129,7 +145,12 @@
       flowState = 'idle';
     });
 
-    unlisteners = [u1, u2, u3];
+    const u4 = await listen<{ hotkey_full: string; hotkey_area: string }>('settings-changed', (event) => {
+      hotkeyFull = event.payload.hotkey_full;
+      hotkeyArea = event.payload.hotkey_area;
+    });
+
+    unlisteners = [u1, u2, u3, u4];
   }
 
   function cleanupListeners() {

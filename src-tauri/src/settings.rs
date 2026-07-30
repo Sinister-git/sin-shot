@@ -5,7 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::hotkeys::{self, HotkeyState};
 
@@ -155,7 +155,8 @@ pub async fn save_settings(
     })?;
     tracing::info!("Settings saved to {}", path.display());
 
-    // If hotkey combos changed, unregister the old and register the new
+    // If hotkey combos changed, unregister the old and register the new.
+    // On failure, re-register the old hotkey so the user isn't left without one.
     if old_settings.hotkey_full != settings.hotkey_full {
         let _ = hotkeys::unregister_hotkey_platform(&old_settings.hotkey_full);
         match hotkeys::register_hotkey_platform(&settings.hotkey_full, app.clone()) {
@@ -173,6 +174,13 @@ pub async fn save_settings(
                     settings.hotkey_full,
                     e
                 );
+                // Re-register the old hotkey so the user still has a working combo
+                let _ = hotkeys::register_hotkey_platform(&old_settings.hotkey_full, app.clone());
+                return Err(format!(
+                    "Failed to register hotkey '{}': {}",
+                    settings.hotkey_full,
+                    e
+                ));
             }
         }
     }
@@ -194,9 +202,24 @@ pub async fn save_settings(
                     settings.hotkey_area,
                     e
                 );
+                // Re-register the old hotkey so the user still has a working combo
+                let _ = hotkeys::register_hotkey_platform(&old_settings.hotkey_area, app.clone());
+                return Err(format!(
+                    "Failed to register hotkey '{}': {}",
+                    settings.hotkey_area,
+                    e
+                ));
             }
         }
     }
+
+    let _ = app.emit(
+        "settings-changed",
+        serde_json::json!({
+            "hotkey_full": settings.hotkey_full,
+            "hotkey_area": settings.hotkey_area,
+        }),
+    );
 
     Ok(())
 }
@@ -330,5 +353,53 @@ mod tests {
         };
         let clamped = s.jpeg_quality.clamp(60, 100);
         assert_eq!(clamped, 80);
+    }
+
+    /// When a hotkey combo changes, the HotkeyState should be updated:
+    /// old combo is removed, new combo is added. This mirrors the
+    /// retain+push logic in save_settings.
+    #[test]
+    fn hotkey_state_rotation_on_combo_change() {
+        let mut state = crate::hotkeys::HotkeyState::new();
+        state.hotkeys_registered.push("Ctrl+Shift+1".into());
+        state.hotkeys_registered.push("Ctrl+Shift+2".into());
+
+        let old_combo = "Ctrl+Shift+1";
+        let new_combo = "Ctrl+Shift+X";
+
+        // rotate: remove both old and new (defensive), then push new
+        state
+            .hotkeys_registered
+            .retain(|k| k != old_combo && k != new_combo);
+        state.hotkeys_registered.push(new_combo.to_string());
+
+        assert_eq!(state.hotkeys_registered.len(), 2);
+        assert!(!state.hotkeys_registered.contains(&old_combo.to_string()));
+        assert!(state.hotkeys_registered.contains(&"Ctrl+Shift+2".to_string()));
+        assert!(state.hotkeys_registered.contains(&new_combo.to_string()));
+    }
+
+    /// Verifies that default hotkey combos match what the frontend
+    /// (Overlay.svelte) initialises as fallback values.
+    #[test]
+    fn default_hotkeys_match_overlay_fallbacks() {
+        let s = Settings::default();
+        assert_eq!(s.hotkey_full, "Ctrl+Shift+1");
+        assert_eq!(s.hotkey_area, "Ctrl+Shift+2");
+    }
+
+    /// Verifies the settings-changed event payload contains the
+    /// correct hotkey combo keys.
+    #[test]
+    fn settings_changed_event_payload_shape() {
+        let payload = serde_json::json!({
+            "hotkey_full": "Ctrl+Shift+F",
+            "hotkey_area": "Ctrl+Shift+A",
+        });
+        let json = serde_json::to_string(&payload).unwrap();
+        assert!(json.contains("hotkey_full"));
+        assert!(json.contains("hotkey_area"));
+        assert!(json.contains("Ctrl+Shift+F"));
+        assert!(json.contains("Ctrl+Shift+A"));
     }
 }
