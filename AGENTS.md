@@ -15,6 +15,8 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 - **Settings window**: normal framed window (label `"settings"`, URL `/settings`), created on-demand in `show_settings` command, accessible from tray menu
 - **Tray**: built in `setup()` with `TrayIconBuilder`, menu items "Settings" (spawns `show_settings`) and "Quit"
 - **Rust check**: `cargo check --manifest-path src-tauri/Cargo.toml`
+- **Rust lint**: `cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings`
+- **Frontend test**: `npm test` (vitest), `npm run check` (svelte-check)
 - **Window config**: frameless, transparent, always-on-top overlay for capture mode
 - **No-mistakes gate**: push via `git push no-mistakes <branch>`
 
