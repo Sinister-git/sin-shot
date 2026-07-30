@@ -1,0 +1,29 @@
+[Unit]
+Description=Sin Shot Upload Server
+After=network.target
+
+[Service]
+Type=simple
+User=sin-shot
+Group=sin-shot
+WorkingDirectory=/opt/sin-shot-server
+ExecStart=/opt/sin-shot-server/sin-shot-server
+Restart=always
+RestartSec=5
+
+# Environment
+Environment=PORT=8080
+Environment=STORAGE_DIR=/opt/sin-shot-server/uploads
+Environment=MAX_FILE_SIZE_MB=25
+Environment=BASE_URL=https://sinister.ovh
+
+# Security hardening
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/opt/sin-shot-server/uploads
+ReadOnlyPaths=/opt/sin-shot-server/sin-shot-server
+
+[Install]
+WantedBy=multi-user.target

@@ -4,7 +4,7 @@ A sharp screenshot tool for Windows — capture, annotate, and share.
 
 ## Stack
 - **Desktop app:** Tauri v2 + Rust + Svelte 5
-- **Upload server:** Self-hosted Go/Rust binary
+- **Upload server:** Self-hosted Rust binary (axum + tokio)
 - **Web gallery:** screenshots.sinister.ovh
 
 ## Development
