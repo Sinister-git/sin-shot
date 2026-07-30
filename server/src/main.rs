@@ -40,46 +40,47 @@ fn load_config() -> Config {
             .and_then(|v| v.parse::<usize>().ok())
             .map(|n| n * 1024 * 1024)
             .unwrap_or(25 * 1024 * 1024),
-        base_url: std::env::var("BASE_URL").unwrap_or_else(|_| "https://sinister.ovh".into()),
+        base_url: std::env::var("BASE_URL")
+            .unwrap_or_else(|_| "https://sinister.ovh".into())
+            .trim_end_matches('/')
+            .to_string(),
     }
 }
 
 // ── Rate Limiter ────────────────────────────────────────────────────
 
 struct RateLimiter {
-    buckets: HashMap<String, (u32, Instant)>,
-    max_requests: u32,
+    buckets: HashMap<String, (f64, Instant)>,
+    max_requests: f64,
     window: Duration,
+    rate: f64,
 }
 
 impl RateLimiter {
     fn new(max_requests: u32, window_secs: u64) -> Self {
+        let max = max_requests as f64;
+        let window = Duration::from_secs(window_secs);
         Self {
             buckets: HashMap::new(),
-            max_requests,
-            window: Duration::from_secs(window_secs),
+            max_requests: max,
+            window,
+            rate: max / window_secs as f64,
         }
     }
 
     fn allow(&mut self, ip: &str) -> bool {
         let now = Instant::now();
         let entry = self.buckets.entry(ip.to_string()).or_insert_with(|| {
-            // First request: consume 1 token
-            (self.max_requests - 1, now)
+            (self.max_requests, now)
         });
 
         let (tokens, last) = entry;
+        let elapsed = now.duration_since(*last).as_secs_f64();
+        *tokens = (*tokens + elapsed * self.rate).min(self.max_requests);
+        *last = now;
 
-        // Refill tokens
-        let elapsed = now.duration_since(*last);
-        let refills = (elapsed.as_secs_f64() / self.window.as_secs_f64()) as u32;
-        if refills > 0 {
-            *tokens = (*tokens + refills * self.max_requests).min(self.max_requests);
-            *last = now;
-        }
-
-        if *tokens > 0 {
-            *tokens -= 1;
+        if *tokens >= 1.0 {
+            *tokens -= 1.0;
             true
         } else {
             false
@@ -278,7 +279,7 @@ async fn handle_serve(
         let file_path = state.config.storage_dir.join(format!("{}{}", key, ext));
         match fs::read(&file_path).await {
             Ok(data) => {
-                let ct = content_type_from_ext(ext);
+                let ct = *_mime;
                 return (
                     StatusCode::OK,
                     [

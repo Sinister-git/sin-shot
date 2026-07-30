@@ -4,14 +4,21 @@ RUN apk add --no-cache musl-dev
 WORKDIR /app
 COPY Cargo.toml Cargo.lock ./
 COPY src ./src
-RUN cargo build --release --target x86_64-unknown-linux-musl
+ARG TARGETARCH
+RUN case "$TARGETARCH" in \
+      arm64) RUST_TARGET=aarch64-unknown-linux-musl ;; \
+      *)     RUST_TARGET=x86_64-unknown-linux-musl ;; \
+    esac && \
+    rustup target add "$RUST_TARGET" && \
+    cargo build --release --target "$RUST_TARGET" && \
+    cp "/app/target/$RUST_TARGET/release/sin-shot-server" /app/sin-shot-server
 
 # Runtime stage — minimal alpine, no runtime deps
 FROM alpine:3.21
 RUN apk add --no-cache ca-certificates
 WORKDIR /app
 RUN mkdir -p /app/uploads
-COPY --from=builder /app/target/x86_64-unknown-linux-musl/release/sin-shot-server /app/sin-shot-server
+COPY --from=builder /app/sin-shot-server /app/sin-shot-server
 
 ENV STORAGE_DIR=/app/uploads
 ENV PORT=8080
