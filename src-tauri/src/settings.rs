@@ -71,14 +71,11 @@ fn dirs_fallback_pictures() -> String {
 // ---------------------------------------------------------------------------
 
 fn settings_path(app: &AppHandle) -> Result<PathBuf, String> {
-    let dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| {
-            let msg = format!("app_data_dir failed: {e}");
-            tracing::error!("{}", msg);
-            msg
-        })?;
+    let dir = app.path().app_data_dir().map_err(|e| {
+        let msg = format!("app_data_dir failed: {e}");
+        tracing::error!("{}", msg);
+        msg
+    })?;
     std::fs::create_dir_all(&dir).map_err(|e| {
         let msg = format!("create_dir_all for settings dir failed: {e}");
         tracing::error!("{}", msg);
@@ -94,15 +91,13 @@ fn settings_path(app: &AppHandle) -> Result<PathBuf, String> {
 pub fn load_settings_sync(app: &AppHandle) -> Settings {
     match settings_path(app) {
         Ok(path) if path.exists() => match std::fs::read_to_string(&path) {
-            Ok(raw) => {
-                match serde_json::from_str(&raw) {
-                    Ok(s) => s,
-                    Err(e) => {
-                        tracing::error!("Failed to parse settings file: {}", e);
-                        Settings::default()
-                    }
+            Ok(raw) => match serde_json::from_str(&raw) {
+                Ok(s) => s,
+                Err(e) => {
+                    tracing::error!("Failed to parse settings file: {}", e);
+                    Settings::default()
                 }
-            }
+            },
             Err(e) => {
                 tracing::error!("Failed to read settings file: {}", e);
                 Settings::default()
@@ -148,12 +143,11 @@ pub async fn save_settings(
 
     settings.jpeg_quality = settings.jpeg_quality.clamp(60, 100);
     let path = settings_path(&app)?;
-    let raw =
-        serde_json::to_string_pretty(&settings).map_err(|e| {
-            let msg = format!("serialize settings: {e}");
-            tracing::error!("{}", msg);
-            msg
-        })?;
+    let raw = serde_json::to_string_pretty(&settings).map_err(|e| {
+        let msg = format!("serialize settings: {e}");
+        tracing::error!("{}", msg);
+        msg
+    })?;
     std::fs::write(&path, raw).map_err(|e| {
         let msg = format!("write settings file: {e}");
         tracing::error!("{}", msg);
@@ -229,13 +223,11 @@ pub async fn show_settings(app: AppHandle) -> Result<(), String> {
             tracing::error!("{}", msg);
             msg
         })?;
-        window
-            .set_focus()
-            .map_err(|e| {
-                let msg = format!("focus settings: {e}");
-                tracing::error!("{}", msg);
-                msg
-            })?;
+        window.set_focus().map_err(|e| {
+            let msg = format!("focus settings: {e}");
+            tracing::error!("{}", msg);
+            msg
+        })?;
     } else {
         // Build from the config entry with label "settings"
         use tauri::WebviewWindowBuilder;
@@ -267,13 +259,11 @@ pub async fn show_settings(app: AppHandle) -> Result<(), String> {
             tracing::error!("{}", msg);
             msg
         })?;
-        window
-            .set_focus()
-            .map_err(|e| {
-                let msg = format!("focus settings: {e}");
-                tracing::error!("{}", msg);
-                msg
-            })?;
+        window.set_focus().map_err(|e| {
+            let msg = format!("focus settings: {e}");
+            tracing::error!("{}", msg);
+            msg
+        })?;
     }
     Ok(())
 }

@@ -74,9 +74,22 @@ pub async fn capture_area(
         tracing::error!("Failed to lock capture state: {}", e);
         e.to_string()
     })?;
-    tracing::info!("Capturing area: x={}, y={}, w={}, h={}", x, y, width, height);
+    tracing::info!(
+        "Capturing area: x={}, y={}, w={}, h={}",
+        x,
+        y,
+        width,
+        height
+    );
     platform::capture_desktop_rect(x, y, width as u32, height as u32).map_err(|e| {
-        tracing::error!("Capture area ({},{},{},{}) failed: {}", x, y, width, height, e);
+        tracing::error!(
+            "Capture area ({},{},{},{}) failed: {}",
+            x,
+            y,
+            width,
+            height,
+            e
+        );
         e
     })
 }
@@ -207,13 +220,11 @@ mod platform {
         device: &ID3D11Device,
     ) -> Result<IDXGIOutputDuplication, String> {
         unsafe {
-            output1
-                .DuplicateOutput(device)
-                .map_err(|e| {
-                    let msg = format!("DuplicateOutput failed: {e}");
-                    tracing::error!("{}", msg);
-                    msg
-                })
+            output1.DuplicateOutput(device).map_err(|e| {
+                let msg = format!("DuplicateOutput failed: {e}");
+                tracing::error!("{}", msg);
+                msg
+            })
         }
     }
 
@@ -249,12 +260,11 @@ mod platform {
 
             let result = process_acquired_frame(device, context, &resource);
 
-            dupl.ReleaseFrame()
-                .map_err(|e| {
-                    let msg = format!("ReleaseFrame failed: {e}");
-                    tracing::error!("{}", msg);
-                    msg
-                })?;
+            dupl.ReleaseFrame().map_err(|e| {
+                let msg = format!("ReleaseFrame failed: {e}");
+                tracing::error!("{}", msg);
+                msg
+            })?;
 
             result
         }
@@ -267,13 +277,11 @@ mod platform {
         context: &ID3D11DeviceContext,
         resource: &IDXGIResource,
     ) -> Result<(u32, u32, Vec<u8>), String> {
-        let tex: ID3D11Texture2D = resource
-            .cast()
-            .map_err(|e| {
-                let msg = format!("Cast resource to texture failed: {e}");
-                tracing::error!("{}", msg);
-                msg
-            })?;
+        let tex: ID3D11Texture2D = resource.cast().map_err(|e| {
+            let msg = format!("Cast resource to texture failed: {e}");
+            tracing::error!("{}", msg);
+            msg
+        })?;
 
         let mut tex_desc = D3D11_TEXTURE2D_DESC::default();
         tex.GetDesc(&mut tex_desc);
@@ -351,12 +359,11 @@ mod platform {
     /// Internal helper: capture the full monitor and return raw RGBA pixels.
     fn capture_monitor_rgba(monitor_name: &str) -> Result<(u32, u32, Vec<u8>), String> {
         unsafe {
-            let factory: IDXGIFactory1 =
-                CreateDXGIFactory1().map_err(|e| {
-                    let msg = format!("CreateDXGIFactory1 failed: {e}");
-                    tracing::error!("{}", msg);
-                    msg
-                })?;
+            let factory: IDXGIFactory1 = CreateDXGIFactory1().map_err(|e| {
+                let msg = format!("CreateDXGIFactory1 failed: {e}");
+                tracing::error!("{}", msg);
+                msg
+            })?;
 
             let (output1, _desc) = get_output_by_name(&factory, monitor_name)?;
             let (device, context) = create_device()?;
@@ -384,12 +391,11 @@ mod platform {
         }
 
         unsafe {
-            let factory: IDXGIFactory1 =
-                CreateDXGIFactory1().map_err(|e| {
-                    let msg = format!("CreateDXGIFactory1 failed: {e}");
-                    tracing::error!("{}", msg);
-                    msg
-                })?;
+            let factory: IDXGIFactory1 = CreateDXGIFactory1().map_err(|e| {
+                let msg = format!("CreateDXGIFactory1 failed: {e}");
+                tracing::error!("{}", msg);
+                msg
+            })?;
 
             // Create one D3D11 device reused for all monitor captures.
             let (device, context) = create_device()?;

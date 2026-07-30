@@ -37,12 +37,11 @@ pub async fn save_to_file(
         "Could not find Pictures directory".to_string()
     })?;
     let save_dir = pictures.join("Sin Shot");
-    std::fs::create_dir_all(&save_dir)
-        .map_err(|e| {
-            let msg = format!("Failed to create save directory: {e}");
-            tracing::error!("{}", msg);
-            msg
-        })?;
+    std::fs::create_dir_all(&save_dir).map_err(|e| {
+        let msg = format!("Failed to create save directory: {e}");
+        tracing::error!("{}", msg);
+        msg
+    })?;
 
     let timestamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

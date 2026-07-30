@@ -43,13 +43,11 @@ pub async fn start_capture(app: AppHandle, mode: String) -> Result<(), String> {
     let window = get_main_window(&app)?;
 
     // Compute the bounding box that encompasses all monitors.
-    let monitors = window
-        .available_monitors()
-        .map_err(|e| {
-            let msg = format!("failed to enumerate monitors: {e}");
-            tracing::error!("{}", msg);
-            msg
-        })?;
+    let monitors = window.available_monitors().map_err(|e| {
+        let msg = format!("failed to enumerate monitors: {e}");
+        tracing::error!("{}", msg);
+        msg
+    })?;
 
     if monitors.is_empty() {
         tracing::error!("No monitors available for capture");
@@ -152,13 +150,11 @@ pub async fn cancel_capture(app: AppHandle) -> Result<(), String> {
         }));
     }
 
-    window
-        .emit("capture-mode-cancelled", ())
-        .map_err(|e| {
-            let msg = format!("emit capture-mode-cancelled: {e}");
-            tracing::error!("{}", msg);
-            msg
-        })?;
+    window.emit("capture-mode-cancelled", ()).map_err(|e| {
+        let msg = format!("emit capture-mode-cancelled: {e}");
+        tracing::error!("{}", msg);
+        msg
+    })?;
 
     Ok(())
 }
@@ -168,21 +164,17 @@ pub async fn cancel_capture(app: AppHandle) -> Result<(), String> {
 pub async fn get_monitors(app: AppHandle) -> Result<Vec<MonitorInfo>, String> {
     let window = get_main_window(&app)?;
 
-    let monitors = window
-        .available_monitors()
-        .map_err(|e| {
-            let msg = format!("failed to enumerate monitors: {e}");
-            tracing::error!("{}", msg);
-            msg
-        })?;
+    let monitors = window.available_monitors().map_err(|e| {
+        let msg = format!("failed to enumerate monitors: {e}");
+        tracing::error!("{}", msg);
+        msg
+    })?;
 
-    let primary: Option<Monitor> = window
-        .primary_monitor()
-        .map_err(|e| {
-            let msg = format!("primary_monitor: {e}");
-            tracing::error!("{}", msg);
-            msg
-        })?;
+    let primary: Option<Monitor> = window.primary_monitor().map_err(|e| {
+        let msg = format!("primary_monitor: {e}");
+        tracing::error!("{}", msg);
+        msg
+    })?;
 
     let mut result = Vec::new();
     for m in &monitors {

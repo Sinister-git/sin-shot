@@ -384,12 +384,10 @@ mod platform {
         // Send command to hotkey thread and wait for result
         let (result_tx, result_rx) = mpsc::channel();
         let tx = THREAD_TX.lock().unwrap();
-        let tx = tx
-            .as_ref()
-            .ok_or_else(|| {
-                tracing::error!("hotkey thread not initialised — call init() first");
-                "hotkey thread not initialised — call init() first".to_string()
-            })?;
+        let tx = tx.as_ref().ok_or_else(|| {
+            tracing::error!("hotkey thread not initialised — call init() first");
+            "hotkey thread not initialised — call init() first".to_string()
+        })?;
 
         tx.send(ThreadCmd::Register {
             id,
@@ -403,13 +401,11 @@ mod platform {
             msg
         })?;
 
-        result_rx
-            .recv()
-            .map_err(|e| {
-                let msg = format!("hotkey thread disconnected: {e}");
-                tracing::error!("{}", msg);
-                msg
-            })??;
+        result_rx.recv().map_err(|e| {
+            let msg = format!("hotkey thread disconnected: {e}");
+            tracing::error!("{}", msg);
+            msg
+        })??;
 
         // Store combo→id mapping for unregistration
         COMBO_IDS.lock().unwrap().insert(combo.to_string(), id);
@@ -437,12 +433,11 @@ mod platform {
             "hotkey thread not initialised".to_string()
         })?;
 
-        tx.send(ThreadCmd::Unregister { id })
-            .map_err(|e| {
-                let msg = format!("failed to send unregister command: {e}");
-                tracing::error!("{}", msg);
-                msg
-            })?;
+        tx.send(ThreadCmd::Unregister { id }).map_err(|e| {
+            let msg = format!("failed to send unregister command: {e}");
+            tracing::error!("{}", msg);
+            msg
+        })?;
 
         COMBO_IDS.lock().unwrap().remove(combo);
 
