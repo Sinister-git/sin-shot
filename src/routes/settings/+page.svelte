@@ -154,6 +154,14 @@
   }
 
   async function handleHotkeyChange(entry: HotkeyEntry, oldCombo: string) {
+    // Check for cross-action collisions
+    for (const h of hotkeys) {
+      if (h.id !== entry.id && h.combo === entry.combo) {
+        showToast(`Combo ${entry.combo} already used by "${h.label}"`);
+        entry.combo = oldCombo;
+        return;
+      }
+    }
     try {
       if (oldCombo && oldCombo !== entry.combo) {
         await invoke('unregister_hotkey', { keyCombo: oldCombo });

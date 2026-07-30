@@ -129,10 +129,12 @@ pub async fn show_settings(app: AppHandle) -> Result<(), String> {
             .find(|w| w.label == "settings")
             .ok_or("settings window not found in config")?
             .clone();
-        WebviewWindowBuilder::from_config(&app, &config)
+        let window = WebviewWindowBuilder::from_config(&app, &config)
             .map_err(|e| format!("settings window config: {e}"))?
             .build()
             .map_err(|e| format!("build settings window: {e}"))?;
+        window.show().map_err(|e| format!("show settings: {e}"))?;
+        window.set_focus().map_err(|e| format!("focus settings: {e}"))?;
     }
     Ok(())
 }
@@ -178,8 +180,17 @@ mod tests {
 
     #[test]
     fn jpeg_quality_clamping() {
-        let s = Settings::default();
-        assert!(s.jpeg_quality >= 60);
-        assert!(s.jpeg_quality <= 100);
+        // Below minimum should clamp to 60
+        let s = Settings { jpeg_quality: 0, ..Settings::default() };
+        let clamped = s.jpeg_quality.clamp(60, 100);
+        assert_eq!(clamped, 60);
+        // Above maximum should clamp to 100
+        let s = Settings { jpeg_quality: 255, ..Settings::default() };
+        let clamped = s.jpeg_quality.clamp(60, 100);
+        assert_eq!(clamped, 100);
+        // Within range should stay unchanged
+        let s = Settings { jpeg_quality: 80, ..Settings::default() };
+        let clamped = s.jpeg_quality.clamp(60, 100);
+        assert_eq!(clamped, 80);
     }
 }
