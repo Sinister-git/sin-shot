@@ -18,7 +18,7 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 - **Rust lint**: `cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings`
 - **Frontend test**: `npm test` (vitest), `npm run check` (svelte-check)
 - **Window config**: frameless, transparent, always-on-top overlay for capture mode
-- **Annotation editor**: `AnnotationCanvas.svelte` (HTML5 Canvas, tools: pen/arrow/rect/text/blur/eraser, 50-op undo/redo), `Toolbar.svelte` (vertical, right side), `ActionBar.svelte` (copy/save/upload/cancel), orchestrated by `Overlay.svelte`
+- **Annotation editor components**: `AnnotationCanvas.svelte` (HTML5 Canvas, tools: pen/arrow/rect/text/blur/eraser, 50-op undo/redo), `Toolbar.svelte` (vertical, right side), `ActionBar.svelte` (copy/save/upload/cancel)
 - **Svelte 5 runes**: `$state`, `$props`, `$bindable()`, `$effect` — no legacy stores
 - **No-mistakes gate**: push via `git push no-mistakes <branch>`
 
