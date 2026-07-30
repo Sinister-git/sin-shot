@@ -93,7 +93,7 @@
 
     // Listen for cancellation.
     const u3 = await listen('capture-mode-cancelled', () => {
-      resetState();
+      mode = null;
     });
 
     unlisteners = [u1, u2, u3];
@@ -110,9 +110,14 @@
   // Lifecycle
   // ---------------------------------------------------------------------------
 
+  let setupPromise: Promise<void> | null = null;
+
   $effect(() => {
-    setupListeners();
-    return cleanupListeners;
+    setupPromise = setupListeners();
+    return () => {
+      cleanupListeners();
+      setupPromise?.then(() => cleanupListeners());
+    };
   });
 
   $effect(() => {
@@ -222,14 +227,14 @@
   // ---------------------------------------------------------------------------
 
   async function onFullClick(_e?: MouseEvent | KeyboardEvent) {
-    if (cursorMonitor < 0) return;
-    await doFullCapture(cursorMonitor);
+    if (!activeMonitor) return;
+    await doFullCapture(activeMonitor.name);
   }
 
-  async function doFullCapture(monitorIndex: number) {
+  async function doFullCapture(monitorName: string) {
     try {
-      const result = await invoke('capture_full_screen', { monitorIndex });
-      console.log('captured full monitor', monitorIndex, result);
+      const result = await invoke('capture_full_screen', { monitorName });
+      console.log('captured full monitor', monitorName, result);
       // TODO: post-capture flow (show ActionBar, annotation, etc.)
     } catch (err) {
       console.error('capture_full_screen failed:', err);
@@ -294,8 +299,12 @@
       return;
     }
 
+    const primary = monitors.find((m) => m.is_primary);
+    const monitorName = primary?.name ?? '';
+
     try {
       const result = await invoke('capture_area', {
+        monitorName,
         x: Math.round(x),
         y: Math.round(y),
         width: Math.round(width),

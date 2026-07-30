@@ -41,31 +41,30 @@ impl CaptureState {
 // Tauri commands — signatures match the scaffold exactly
 // ---------------------------------------------------------------------------
 
-/// Capture the entire monitor at `monitor_index`.
-///
-/// The primary monitor is index 0.
+/// Capture the entire monitor identified by its GDI device name
+/// (e.g. "\\\\.\\DISPLAY1").
 #[tauri::command]
 pub async fn capture_full_screen(
     state: State<'_, Mutex<CaptureState>>,
-    monitor_index: u32,
+    monitor_name: String,
 ) -> Result<CaptureResult, String> {
     let _guard = state.lock().map_err(|e| e.to_string())?;
-    platform::capture_monitor(monitor_index)
+    platform::capture_monitor(&monitor_name)
 }
 
-/// Capture a user-selected rectangular area from the primary monitor.
-///
-/// Coordinates are relative to the monitor origin (top-left).
+/// Capture a user-selected rectangular area from the monitor identified
+/// by its GDI device name. Coordinates are relative to the monitor origin.
 #[tauri::command]
 pub async fn capture_area(
     state: State<'_, Mutex<CaptureState>>,
+    monitor_name: String,
     x: i32,
     y: i32,
     width: i32,
     height: i32,
 ) -> Result<CaptureResult, String> {
     let _guard = state.lock().map_err(|e| e.to_string())?;
-    platform::capture_rect(0, x, y, width as u32, height as u32)
+    platform::capture_rect(&monitor_name, x, y, width as u32, height as u32)
 }
 
 // ---------------------------------------------------------------------------
@@ -130,14 +129,18 @@ mod platform {
         Ok((device, context))
     }
 
-    /// Get the output (monitor) at `monitor_index` by enumerating all
-    /// adapters and outputs into a flat list, then indexing into it.
-    fn get_output(
+    fn device_name_to_string(wide: &[u16; 32]) -> String {
+        let null_pos = wide.iter().position(|&c| c == 0).unwrap_or(wide.len());
+        String::from_utf16_lossy(&wide[..null_pos])
+    }
+
+    /// Get the output (monitor) by GDI device name (e.g. "\\\\.\\DISPLAY1").
+    /// Only considers outputs attached to the desktop.
+    fn get_output_by_name(
         factory: &IDXGIFactory1,
-        monitor_index: u32,
+        monitor_name: &str,
     ) -> Result<(IDXGIOutput1, DXGI_OUTPUT_DESC), String> {
         unsafe {
-            let mut outputs: Vec<(IDXGIOutput, DXGI_OUTPUT_DESC)> = Vec::new();
             let mut adapter_idx = 0u32;
             loop {
                 let adapter: IDXGIAdapter1 = match factory.EnumAdapters1(adapter_idx) {
@@ -153,26 +156,21 @@ mod platform {
                     let desc = output
                         .GetDesc()
                         .map_err(|e| format!("GetDesc failed: {e}"))?;
-                    outputs.push((output, desc));
+                    if desc.AttachedToDesktop.as_bool() {
+                        let name = device_name_to_string(&desc.DeviceName);
+                        if name == monitor_name {
+                            let output1: IDXGIOutput1 = output
+                                .cast()
+                                .map_err(|e| format!("Cast to IDXGIOutput1 failed: {e}"))?;
+                            return Ok((output1, desc));
+                        }
+                    }
                     output_idx += 1;
                 }
                 adapter_idx += 1;
             }
-
-            if (monitor_index as usize) >= outputs.len() {
-                return Err(format!(
-                    "monitor index {monitor_index} out of range (found {} outputs)",
-                    outputs.len()
-                ));
-            }
-
-            let (output, desc) = outputs.remove(monitor_index as usize);
-            let output1: IDXGIOutput1 = output
-                .cast()
-                .map_err(|e| format!("Cast to IDXGIOutput1 failed: {e}"))?;
-
-            Ok((output1, desc))
         }
+        Err(format!("monitor '{}' not found", monitor_name))
     }
 
     /// Build the duplication object for the given output.
@@ -281,8 +279,8 @@ mod platform {
 
     /// Capture the entire monitor, returning RGBA pixels as a pre-encoded
     /// CaptureResult.
-    pub fn capture_monitor(monitor_index: u32) -> Result<CaptureResult, String> {
-        let (width, height, rgba) = capture_monitor_rgba(monitor_index)?;
+    pub fn capture_monitor(monitor_name: &str) -> Result<CaptureResult, String> {
+        let (width, height, rgba) = capture_monitor_rgba(monitor_name)?;
         let data = base64::engine::general_purpose::STANDARD.encode(&rgba);
         Ok(CaptureResult {
             width,
@@ -292,12 +290,12 @@ mod platform {
     }
 
     /// Internal helper: capture the full monitor and return raw RGBA pixels.
-    fn capture_monitor_rgba(monitor_index: u32) -> Result<(u32, u32, Vec<u8>), String> {
+    fn capture_monitor_rgba(monitor_name: &str) -> Result<(u32, u32, Vec<u8>), String> {
         unsafe {
             let factory: IDXGIFactory1 =
                 CreateDXGIFactory1().map_err(|e| format!("CreateDXGIFactory1 failed: {e}"))?;
 
-            let (output1, _desc) = get_output(&factory, monitor_index)?;
+            let (output1, _desc) = get_output_by_name(&factory, monitor_name)?;
             let (device, context) = create_device()?;
             let dupl = duplicate_output(&output1, &device)?;
 
@@ -308,13 +306,13 @@ mod platform {
     }
 
     pub fn capture_rect(
-        monitor_index: u32,
+        monitor_name: &str,
         x: i32,
         y: i32,
         w: u32,
         h: u32,
     ) -> Result<CaptureResult, String> {
-        let (full_width, full_height, rgba) = capture_monitor_rgba(monitor_index)?;
+        let (full_width, full_height, rgba) = capture_monitor_rgba(monitor_name)?;
 
         let rx = x.max(0) as u32;
         let ry = y.max(0) as u32;
@@ -350,12 +348,12 @@ mod platform {
 mod platform {
     use super::CaptureResult;
 
-    pub fn capture_monitor(_monitor_index: u32) -> Result<CaptureResult, String> {
+    pub fn capture_monitor(_monitor_name: &str) -> Result<CaptureResult, String> {
         Err("screen capture is only supported on Windows".into())
     }
 
     pub fn capture_rect(
-        _monitor_index: u32,
+        _monitor_name: &str,
         _x: i32,
         _y: i32,
         _w: u32,
@@ -407,11 +405,11 @@ mod tests {
 
     #[test]
     fn non_windows_capture_stubs_return_error() {
-        let r = platform::capture_monitor(0);
+        let r = platform::capture_monitor("");
         assert!(r.is_err());
         assert!(r.unwrap_err().contains("Windows"));
 
-        let r = platform::capture_rect(0, 0, 0, 100, 100);
+        let r = platform::capture_rect("", 0, 0, 100, 100);
         assert!(r.is_err());
         assert!(r.unwrap_err().contains("Windows"));
     }
