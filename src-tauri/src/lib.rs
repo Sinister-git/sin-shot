@@ -1,12 +1,17 @@
 mod capture;
 mod clipboard;
 mod hotkeys;
+mod settings;
 mod upload;
 
 use capture::CaptureState;
 use clipboard::ClipboardState;
 use hotkeys::HotkeyState;
 use tauri::Manager;
+use tauri::{
+    menu::{MenuBuilder, MenuItemBuilder},
+    tray::TrayIconBuilder,
+};
 use upload::UploadState;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -43,6 +48,35 @@ pub fn run() {
                 }
             }
 
+            // Build system tray with Settings & Quit menu items
+            let settings_item = MenuItemBuilder::with_id("settings", "Settings")
+                .build(app)?;
+            let quit_item = MenuItemBuilder::with_id("quit", "Quit")
+                .build(app)?;
+            let tray_menu = MenuBuilder::new(app)
+                .item(&settings_item)
+                .separator()
+                .item(&quit_item)
+                .build()?;
+
+            let handle_clone = app.handle().clone();
+            let _tray = TrayIconBuilder::new()
+                .menu(&tray_menu)
+                .show_menu_on_left_click(false)
+                .on_menu_event(move |_app, event| match event.id().as_ref() {
+                    "settings" => {
+                        let h = handle_clone.clone();
+                        tauri::async_runtime::spawn(async move {
+                            let _ = settings::show_settings(h).await;
+                        });
+                    }
+                    "quit" => {
+                        std::process::exit(0);
+                    }
+                    _ => {}
+                })
+                .build(app)?;
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -52,6 +86,10 @@ pub fn run() {
             clipboard::read_from_clipboard,
             hotkeys::register_hotkey,
             hotkeys::unregister_hotkey,
+            settings::get_settings,
+            settings::save_settings,
+            settings::get_hotkeys,
+            settings::show_settings,
             upload::upload_screenshot,
         ])
         .run(tauri::generate_context!())
