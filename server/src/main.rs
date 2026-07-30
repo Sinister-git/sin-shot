@@ -70,9 +70,10 @@ impl RateLimiter {
 
     fn allow(&mut self, ip: &str) -> bool {
         let now = Instant::now();
-        let entry = self.buckets.entry(ip.to_string()).or_insert_with(|| {
-            (self.max_requests, now)
-        });
+        let entry = self
+            .buckets
+            .entry(ip.to_string())
+            .or_insert_with(|| (self.max_requests, now));
 
         let (tokens, last) = entry;
         let elapsed = now.duration_since(*last).as_secs_f64();
@@ -111,12 +112,7 @@ const ALLOWED_EXTENSIONS: &[(&str, &str)] = &[
 ];
 
 fn detect_mime(data: &[u8]) -> Option<(&'static str, &'static str)> {
-    if data.len() >= 8
-        && data[0] == 0x89
-        && data[1] == b'P'
-        && data[2] == b'N'
-        && data[3] == b'G'
-    {
+    if data.len() >= 8 && data[0] == 0x89 && data[1] == b'P' && data[2] == b'N' && data[3] == b'G' {
         return Some(("image/png", ".png"));
     }
     if data.len() >= 2 && data[0] == 0xFF && data[1] == 0xD8 {
@@ -148,15 +144,6 @@ fn generate_key(alphabet: &[char], length: usize) -> String {
         .collect()
 }
 
-fn content_type_from_ext(ext: &str) -> &'static str {
-    for (mime, e) in ALLOWED_EXTENSIONS {
-        if *e == ext {
-            return mime;
-        }
-    }
-    "application/octet-stream"
-}
-
 // ── JSON Responses ──────────────────────────────────────────────────
 
 #[derive(Serialize)]
@@ -171,9 +158,7 @@ struct ErrorResponse {
 }
 
 fn error_response(status: StatusCode, msg: impl Into<String>) -> Response {
-    let body = Json(ErrorResponse {
-        error: msg.into(),
-    });
+    let body = Json(ErrorResponse { error: msg.into() });
     (status, body).into_response()
 }
 
@@ -232,16 +217,19 @@ async fn handle_upload(
     let (mime_type, ext) = match detect_mime(&data) {
         Some(m) => m,
         None => {
-            return error_response(StatusCode::BAD_REQUEST, "unsupported file type (accepted: PNG, JPEG, WebP)");
+            return error_response(
+                StatusCode::BAD_REQUEST,
+                "unsupported file type (accepted: PNG, JPEG, WebP)",
+            );
         }
     };
 
     // Generate unique key
     let alphabet: [char; 64] = [
-        'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q',
-        'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H',
-        'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y',
-        'Z', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '_', '-',
+        'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r',
+        's', 't', 'u', 'v', 'w', 'x', 'y', 'z', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J',
+        'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z', '0', '1',
+        '2', '3', '4', '5', '6', '7', '8', '9', '_', '-',
     ];
     let key = generate_key(&alphabet, 16);
 
@@ -265,10 +253,7 @@ async fn handle_upload(
     Json(UploadResponse { url, key }).into_response()
 }
 
-async fn handle_serve(
-    State(state): State<Arc<AppState>>,
-    Path(key): Path<String>,
-) -> Response {
+async fn handle_serve(State(state): State<Arc<AppState>>, Path(key): Path<String>) -> Response {
     // Security: reject paths with slashes or empty keys
     if key.is_empty() || key.contains('/') || key.contains('\\') || key == "api" {
         return error_response(StatusCode::NOT_FOUND, "not found");
@@ -340,7 +325,9 @@ async fn main() {
     let app = Router::new()
         .route("/api/upload", post(handle_upload))
         .route("/{key}", get(handle_serve))
-        .layer(RequestBodyLimitLayer::new(config.max_file_size + 1024 * 1024)) // +1MB for form overhead
+        .layer(RequestBodyLimitLayer::new(
+            config.max_file_size + 1024 * 1024,
+        )) // +1MB for form overhead
         .with_state(state);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], config.port));
