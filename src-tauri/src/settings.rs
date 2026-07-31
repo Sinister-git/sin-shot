@@ -385,7 +385,6 @@ mod tests {
         let mut settings = Settings::default();
         assert!(!normalize_image_format(&mut settings));
     }
-    }
 
     #[test]
     fn settings_roundtrip_json() {
