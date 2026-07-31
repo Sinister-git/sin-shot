@@ -309,7 +309,7 @@ mod platform {
             tex.ok_or_else(|| {
                 tracing::error!("CreateTexture2D returned null");
                 "CreateTexture2D returned null".to_string()
-            })?;
+            })?
         };
 
         context.CopyResource(&staging_tex, &tex);
