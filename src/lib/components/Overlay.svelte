@@ -267,10 +267,15 @@
           mode = m;
           flowState = 'capturing';
         } else {
-          await invoke('cancel_capture');
+          throw new Error('invalid overlay geometry');
         }
       } catch (err) {
         console.error('start_capture failed:', err);
+        try {
+          await invoke('cancel_capture');
+        } catch (cleanupErr) {
+          console.error('cancel_capture after start_capture failure failed:', cleanupErr);
+        }
       }
     } finally {
       entering = false;
