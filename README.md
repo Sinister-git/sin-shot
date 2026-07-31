@@ -26,3 +26,23 @@ The Rust unit tests cover hotkey ownership and rollback bookkeeping on every
 platform, but the native `RegisterHotKey`/`UnregisterHotKey` message-window
 lifecycle can only be validated on Windows. A Windows run is still required to
 verify OS-level release and rebind behavior; F11-to-F10 is one regression case.
+
+## Capture overlay geometry (Windows)
+
+The overlay contract is native and physical-pixel based: the Rust side
+enumerates Windows monitor bounds, places the frameless overlay, and then
+returns the post-placement WebView client origin and size from Tauri's
+`inner_position()`/`inner_size()` together with that WebView's scale factor.
+The frontend applies only that one client-boundary scale; it does not infer
+client bounds from the requested native outer rectangle or from individual
+monitor DPI metadata. The overlay shadow is disabled, but the readback remains
+authoritative for any Windows non-client behavior that remains.
+
+This geometry path is intentionally Windows-runtime-specific. Linux/macOS
+builds can compile and run the pure coordinate tests, but they do not validate
+DXGI capture, Windows virtual-desktop coordinates, Windows per-monitor DPI
+transitions, or Windows frameless-window client insets. A Windows validation
+run must exercise negative virtual-desktop origins, monitor gaps and vertical
+offsets, mixed per-monitor scales, differing resolutions/aspect ratios, and
+all taskbar placements. It should compare the monitor outline's outer edge to
+native monitor bounds after placement; no CSS calibration offset is valid.

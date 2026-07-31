@@ -17,6 +17,7 @@
     monitorToCssRect,
     selectionToDesktopCoords,
     type PhysicalMonitor,
+    isValidOverlayClientGeometry,
   } from './monitor-geometry';
   import { annotationTransition, type CapturedImage } from './capture-flow'
 
@@ -545,9 +546,23 @@
   // ---------------------------------------------------------------------------
 
   function applyOverlayGeometry(geometry: OverlayGeometry) {
+    const clientGeometry = {
+      origin: { x: geometry.origin_x, y: geometry.origin_y },
+      width: geometry.width,
+      height: geometry.height,
+      scaleFactor: geometry.scale_factor,
+    };
+    if (!isValidOverlayClientGeometry(clientGeometry)) {
+      console.error('start_capture returned invalid WebView client geometry', geometry);
+      return;
+    }
+
     monitors = geometry.monitors;
-    virtualOrigin = { x: geometry.origin_x, y: geometry.origin_y };
-    overlayScaleFactor = geometry.scale_factor > 0 ? geometry.scale_factor : 1;
+    // These are authoritative post-placement WebView client bounds, not the
+    // requested native outer rectangle. All monitor/cursor/selection transforms
+    // use this one physical desktop coordinate boundary.
+    virtualOrigin = clientGeometry.origin;
+    overlayScaleFactor = clientGeometry.scaleFactor;
   }
 
   function fmtRes(w: number, h: number): string {
