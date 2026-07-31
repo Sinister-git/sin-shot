@@ -5,13 +5,20 @@
   import Toolbar from './Toolbar.svelte';
   import ActionBar from './ActionBar.svelte';
   import type { Tool } from '$lib/types';
-  import { moveSelection, pointInSelection, type Point, type SelectionRect } from './selection-geometry';
+  import {
+    moveSelection,
+    pointInSelection,
+    selectionFromPointerRelease,
+    type Point,
+    type SelectionRect,
+  } from './selection-geometry';
   import {
     findMonitorAtClient,
     monitorToCssRect,
     selectionToDesktopCoords,
     type PhysicalMonitor,
   } from './monitor-geometry';
+  import { annotationTransition, type CapturedImage } from './capture-flow'
 
   // ---------------------------------------------------------------------------
   // Types
@@ -38,11 +45,6 @@
   let flowState: FlowState = $state('idle');
 
   // Captured image from the backend
-  interface CapturedImage {
-    data: string;   // base64-encoded RGBA pixels
-    width: number;
-    height: number;
-  }
   let capturedImage: CapturedImage | null = $state(null);
 
   // Annotation state
@@ -85,6 +87,7 @@
   let moveStart: Point = $state({ x: 0, y: 0 });
   let moveOrigin: SelectionRect | null = $state(null);
   let selConfirmed: SelectionRect | null = $state(null);
+  let areaCapturePending = $state(false);
   let mousePos: Point = $state({ x: 0, y: 0 });
 
   // ---------------------------------------------------------------------------
@@ -233,7 +236,12 @@
       } else if (flowState === 'capturing') {
         cancelCapture();
       }
-    } else if (e.key === 'Enter' && mode === 'area-select' && selectionRect) {
+    } else if (
+      e.key === 'Enter' &&
+      mode === 'area-select' &&
+      selectionRect &&
+      !areaCapturePending
+    ) {
       e.preventDefault();
       confirmAreaCapture();
     }
@@ -289,6 +297,7 @@
     selStart = { x: 0, y: 0 };
     selCurrent = { x: 0, y: 0 };
     selConfirmed = null;
+    areaCapturePending = false;
     capturedImage = null;
     uploading = false;
     uploadUrl = null;
@@ -376,7 +385,7 @@
     }
   }
 
-  function onAreaPointerUp(e: PointerEvent) {
+  async function onAreaPointerUp(e: PointerEvent) {
     const overlay = e.currentTarget as HTMLElement;
     overlay.releasePointerCapture?.(e.pointerId);
 
@@ -388,17 +397,12 @@
     if (!selecting) return;
     selecting = false;
 
-    const w = Math.abs(selCurrent.x - selStart.x);
-    const h = Math.abs(selCurrent.y - selStart.y);
-    if (w < 2 || h < 2) {
-      selConfirmed = null;
-    } else {
-      selConfirmed = {
-        left: Math.min(selStart.x, selCurrent.x),
-        top: Math.min(selStart.y, selCurrent.y),
-        width: w,
-        height: h,
-      };
+    const completedSelection = selectionFromPointerRelease(selStart, selCurrent);
+    selConfirmed = completedSelection;
+    if (completedSelection) {
+      // A valid release is the capture confirmation. Do not leave the
+      // selection overlay (or its dimming) in place while waiting for Enter.
+      await confirmAreaCapture(completedSelection);
     }
   }
 
@@ -406,18 +410,19 @@
   // Area-select — confirm capture → annotate
   // ---------------------------------------------------------------------------
 
-  async function confirmAreaCapture() {
-    if (!selectionRect) return;
+  async function confirmAreaCapture(selection: SelectionRect | null = selectionRect) {
+    if (!selection || areaCapturePending) return;
+    areaCapturePending = true;
 
     const physicalSelection = selectionToDesktopCoords(
-      selectionRect,
+      selection,
       virtualOrigin,
       overlayScaleFactor,
     );
     const { width, height } = physicalSelection;
 
     if (width < 2 || height < 2) {
-      await cancelCapture();
+      areaCapturePending = false;
       return;
     }
 
@@ -432,6 +437,8 @@
     } catch (err) {
       console.error('capture_area failed:', err);
       await cancelCapture();
+    } finally {
+      areaCapturePending = false;
     }
   }
 
@@ -440,9 +447,10 @@
   // ---------------------------------------------------------------------------
 
   function transitionToAnnotation(image: CapturedImage) {
-    mode = null;          // clear capture mode — we're past capture
-    flowState = 'annotating';
-    capturedImage = image;
+    const transition = annotationTransition(image);
+    mode = transition.mode; // clear capture mode — we're past capture
+    flowState = transition.flowState;
+    capturedImage = transition.capturedImage;
   }
 
   // ---------------------------------------------------------------------------
