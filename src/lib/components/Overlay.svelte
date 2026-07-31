@@ -452,7 +452,7 @@
   // ---------------------------------------------------------------------------
 
   function onAnnotationPointerDown(e: PointerEvent) {
-    if (!selectionSnapshot || e.button !== 0) return;
+    if (areaCapturePending || !selectionSnapshot || e.button !== 0) return;
     movingSelection = true;
     moveStart = { x: e.clientX, y: e.clientY };
     moveOrigin = { ...selectionSnapshot };
@@ -460,7 +460,7 @@
   }
 
   function onAnnotationPointerMove(e: PointerEvent) {
-    if (!movingSelection || !moveOrigin) return;
+    if (areaCapturePending || !movingSelection || !moveOrigin) return;
     selectionSnapshot = moveSelection(
       moveOrigin,
       { x: e.clientX - moveStart.x, y: e.clientY - moveStart.y },
