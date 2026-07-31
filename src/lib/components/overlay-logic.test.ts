@@ -16,6 +16,7 @@ import {
 import {
   findMonitorAtClient,
   monitorToCssRect,
+  isValidOverlayClientGeometry,
   selectionToDesktopCoords as nativeSelectionToDesktopCoords,
   type PhysicalMonitor,
 } from "./monitor-geometry";
@@ -159,6 +160,33 @@ describe("native monitor geometry", () => {
       { x: -2560, y: 0 },
       2,
     )).toEqual({ x: 0, y: 420, width: 1920, height: 1080 });
+  });
+
+  it("uses the measured client origin, not the requested outer origin", () => {
+    const clientOrigin = { x: -2552, y: 7 };
+    expect(monitorToCssRect(monitors[0], clientOrigin, 1.25)).toEqual({
+      left: -6.4,
+      top: 90.4,
+      width: 2048,
+      height: 1152,
+    });
+    expect(nativeSelectionToDesktopCoords(
+      { left: -6.4, top: 90.4, width: 2048, height: 1152 },
+      clientOrigin,
+      1.25,
+    )).toEqual({ x: -2560, y: 120, width: 2560, height: 1440 });
+  });
+
+  it("validates finite positive client geometry from native readback", () => {
+    expect(isValidOverlayClientGeometry({
+      origin: { x: -2560, y: -900 }, width: 7000, height: 2160, scaleFactor: 1.5,
+    })).toBe(true);
+    expect(isValidOverlayClientGeometry({
+      origin: { x: 0, y: 0 }, width: 0, height: 1080, scaleFactor: 1,
+    })).toBe(false);
+    expect(isValidOverlayClientGeometry({
+      origin: { x: 0, y: 0 }, width: 1920, height: 1080, scaleFactor: Number.NaN,
+    })).toBe(false);
   });
 });
 

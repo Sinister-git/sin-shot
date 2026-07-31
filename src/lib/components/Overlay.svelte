@@ -17,6 +17,7 @@
     monitorToCssRect,
     selectionToDesktopCoords,
     type PhysicalMonitor,
+    isValidOverlayClientGeometry,
   } from './monitor-geometry';
   import { annotationTransition, type CapturedImage } from './capture-flow'
 
@@ -145,7 +146,7 @@
     });
 
     const u2 = await listen<{ mode: string; geometry?: OverlayGeometry }>('capture-mode-started', (event) => {
-      if (event.payload.geometry) applyOverlayGeometry(event.payload.geometry);
+      if (!event.payload.geometry || !applyOverlayGeometry(event.payload.geometry)) return;
       mode = event.payload.mode as CaptureMode;
       flowState = 'capturing';
     });
@@ -262,9 +263,19 @@
         // avoids racing a second monitor enumeration and avoids sampling the
         // compact window's DPR before the overlay is moved.
         const geometry = await invoke<OverlayGeometry>('start_capture', { mode: m });
-        applyOverlayGeometry(geometry);
+        if (applyOverlayGeometry(geometry)) {
+          mode = m;
+          flowState = 'capturing';
+        } else {
+          throw new Error('invalid overlay geometry');
+        }
       } catch (err) {
         console.error('start_capture failed:', err);
+        try {
+          await invoke('cancel_capture');
+        } catch (cleanupErr) {
+          console.error('cancel_capture after start_capture failure failed:', cleanupErr);
+        }
       }
     } finally {
       entering = false;
@@ -544,10 +555,25 @@
   // Helpers
   // ---------------------------------------------------------------------------
 
-  function applyOverlayGeometry(geometry: OverlayGeometry) {
+  function applyOverlayGeometry(geometry: OverlayGeometry): boolean {
+    const clientGeometry = {
+      origin: { x: geometry.origin_x, y: geometry.origin_y },
+      width: geometry.width,
+      height: geometry.height,
+      scaleFactor: geometry.scale_factor,
+    };
+    if (!isValidOverlayClientGeometry(clientGeometry)) {
+      console.error('start_capture returned invalid WebView client geometry', geometry);
+      return false;
+    }
+
     monitors = geometry.monitors;
-    virtualOrigin = { x: geometry.origin_x, y: geometry.origin_y };
-    overlayScaleFactor = geometry.scale_factor > 0 ? geometry.scale_factor : 1;
+    // These are authoritative post-placement WebView client bounds, not the
+    // requested native outer rectangle. All monitor/cursor/selection transforms
+    // use this one physical desktop coordinate boundary.
+    virtualOrigin = clientGeometry.origin;
+    overlayScaleFactor = clientGeometry.scaleFactor;
+    return true;
   }
 
   function fmtRes(w: number, h: number): string {

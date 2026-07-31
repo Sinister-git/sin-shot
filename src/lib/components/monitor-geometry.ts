@@ -23,6 +23,17 @@ export interface PhysicalPoint {
   y: number;
 }
 
+/**
+ * The post-placement WebView client rectangle in physical desktop pixels.
+ * Native window outer bounds must not be substituted for this value.
+ */
+export interface OverlayClientGeometry {
+  origin: PhysicalPoint;
+  width: number;
+  height: number;
+  scaleFactor: number;
+}
+
 export interface CssRect {
   left: number;
   top: number;
@@ -30,14 +41,23 @@ export interface CssRect {
   height: number;
 }
 
+/** Validate the native-to-WebView geometry contract before using it. */
+export function isValidOverlayClientGeometry(geometry: OverlayClientGeometry): boolean {
+  return Number.isFinite(geometry.origin.x) &&
+    Number.isFinite(geometry.origin.y) &&
+    Number.isFinite(geometry.width) && geometry.width > 0 &&
+    Number.isFinite(geometry.height) && geometry.height > 0 &&
+    Number.isFinite(geometry.scaleFactor) && geometry.scaleFactor > 0;
+}
+
 export function monitorToCssRect(
   monitor: PhysicalMonitor,
-  virtualOrigin: PhysicalPoint,
+  clientOrigin: PhysicalPoint,
   overlayScaleFactor: number,
 ): CssRect {
   return {
-    left: (monitor.x - virtualOrigin.x) / overlayScaleFactor,
-    top: (monitor.y - virtualOrigin.y) / overlayScaleFactor,
+    left: (monitor.x - clientOrigin.x) / overlayScaleFactor,
+    top: (monitor.y - clientOrigin.y) / overlayScaleFactor,
     width: monitor.width / overlayScaleFactor,
     height: monitor.height / overlayScaleFactor,
   };
@@ -47,11 +67,11 @@ export function findMonitorAtClient(
   clientX: number,
   clientY: number,
   monitors: PhysicalMonitor[],
-  virtualOrigin: PhysicalPoint,
+  clientOrigin: PhysicalPoint,
   overlayScaleFactor: number,
 ): number {
-  const physicalX = virtualOrigin.x + clientX * overlayScaleFactor;
-  const physicalY = virtualOrigin.y + clientY * overlayScaleFactor;
+  const physicalX = clientOrigin.x + clientX * overlayScaleFactor;
+  const physicalY = clientOrigin.y + clientY * overlayScaleFactor;
 
   return monitors.findIndex((monitor) =>
     physicalX >= monitor.x &&
@@ -77,12 +97,12 @@ export interface PhysicalSelection {
 
 export function selectionToDesktopCoords(
   selection: CssSelection,
-  virtualOrigin: PhysicalPoint,
+  clientOrigin: PhysicalPoint,
   overlayScaleFactor: number,
 ): PhysicalSelection {
   return {
-    x: Math.round(virtualOrigin.x + selection.left * overlayScaleFactor),
-    y: Math.round(virtualOrigin.y + selection.top * overlayScaleFactor),
+    x: Math.round(clientOrigin.x + selection.left * overlayScaleFactor),
+    y: Math.round(clientOrigin.y + selection.top * overlayScaleFactor),
     width: Math.round(selection.width * overlayScaleFactor),
     height: Math.round(selection.height * overlayScaleFactor),
   };
