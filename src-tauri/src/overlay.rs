@@ -138,31 +138,57 @@ pub async fn start_capture(app: AppHandle, mode: String) -> Result<OverlayGeomet
         msg
     })?;
 
-    // A native shadow or DPI transition may leave the client origin different
-    // from the requested outer origin. Correct that difference using the
-    // measured native geometry; this is not a CSS offset or monitor-specific
-    // adjustment. The configured overlay shadow is disabled, but the readback
-    // keeps this contract valid if Windows applies another non-client inset.
+    // A native shadow or DPI transition may leave the client rectangle
+    // different from the requested outer rectangle. Correct both position and
+    // size using the measured native geometry; this is not a CSS offset or
+    // monitor-specific adjustment. The configured overlay shadow is disabled,
+    // but the readback keeps this contract valid if Windows applies another
+    // non-client inset.
     let measured_client = window.inner_position().map_err(|e| {
         let msg = format!("inner_position before alignment: {e}");
         tracing::error!("{}", msg);
         msg
     })?;
-    if measured_client.x != min_x || measured_client.y != min_y {
-        let current_outer = window.outer_position().map_err(|e| {
-            let msg = format!("outer_position before alignment: {e}");
-            tracing::error!("{}", msg);
-            msg
-        })?;
-        let corrected_outer = corrected_outer_position(
-            current_outer,
-            measured_client,
-            PhysicalPosition { x: min_x, y: min_y },
-        );
+    let current_outer = window.outer_position().map_err(|e| {
+        let msg = format!("outer_position before alignment: {e}");
+        tracing::error!("{}", msg);
+        msg
+    })?;
+    let current_outer_size = window.outer_size().map_err(|e| {
+        let msg = format!("outer_size before alignment: {e}");
+        tracing::error!("{}", msg);
+        msg
+    })?;
+    let measured_client_size = window.inner_size().map_err(|e| {
+        let msg = format!("inner_size before alignment: {e}");
+        tracing::error!("{}", msg);
+        msg
+    })?;
+    let desired_client = PhysicalSize {
+        width: total_width,
+        height: total_height,
+    };
+    let corrected_outer = corrected_outer_position(
+        current_outer,
+        measured_client,
+        PhysicalPosition { x: min_x, y: min_y },
+    );
+    let corrected_size =
+        corrected_outer_size(current_outer_size, measured_client_size, desired_client);
+    if corrected_outer != current_outer {
         window
             .set_position(Position::Physical(corrected_outer))
             .map_err(|e| {
                 let msg = format!("set_position client alignment: {e}");
+                tracing::error!("{}", msg);
+                msg
+            })?;
+    }
+    if corrected_size != current_outer_size {
+        window
+            .set_size(Size::Physical(corrected_size))
+            .map_err(|e| {
+                let msg = format!("set_size client alignment: {e}");
                 tracing::error!("{}", msg);
                 msg
             })?;
@@ -303,6 +329,23 @@ pub async fn get_monitors(app: AppHandle) -> Result<Vec<MonitorInfo>, String> {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+fn corrected_outer_size(
+    current_outer: PhysicalSize<u32>,
+    measured_client: PhysicalSize<u32>,
+    desired_client: PhysicalSize<u32>,
+) -> PhysicalSize<u32> {
+    PhysicalSize {
+        width: current_outer
+            .width
+            .saturating_add(desired_client.width.saturating_sub(measured_client.width))
+            .max(desired_client.width),
+        height: current_outer
+            .height
+            .saturating_add(desired_client.height.saturating_sub(measured_client.height))
+            .max(desired_client.height),
+    }
+}
 
 fn corrected_outer_position(
     current_outer: PhysicalPosition<i32>,
