@@ -6,18 +6,26 @@
   import ActionBar from './ActionBar.svelte';
   import type { Tool } from '$lib/types';
   import { moveSelection, pointInSelection, type Point, type SelectionRect } from './selection-geometry';
+  import {
+    findMonitorAtClient,
+    monitorToCssRect,
+    selectionToDesktopCoords,
+    type PhysicalMonitor,
+  } from './monitor-geometry';
 
   // ---------------------------------------------------------------------------
   // Types
   // ---------------------------------------------------------------------------
 
-  interface Monitor {
-    name: string;
+  type Monitor = PhysicalMonitor;
+
+  interface OverlayGeometry {
+    monitors: Monitor[];
+    origin_x: number;
+    origin_y: number;
     width: number;
     height: number;
-    x: number;
-    y: number;
-    is_primary: boolean;
+    scale_factor: number;
   }
 
   type CaptureMode = 'full-monitor' | 'area-select' | null;
@@ -56,10 +64,15 @@
   // ---------------------------------------------------------------------------
 
   let mode: CaptureMode = $state(null);
+  // Native contract: monitor bounds, the virtual-desktop origin, and the
+  // overlay window bounds are all physical desktop pixels. CSS coordinates
+  // are derived only at the webview boundary using the overlay's actual
+  // post-placement scale factor. Monitor scale factors are metadata, not a
+  // second transform applied to already-physical bounds.
   let monitors: Monitor[] = $state([]);
-  let windowOffset = $state({ x: 0, y: 0 });
+  let virtualOrigin = $state({ x: 0, y: 0 });
+  let overlayScaleFactor = $state(typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1);
   let entering = $state(false);
-  let dpr = $state(typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1);
 
   // Full-monitor mode
   let cursorMonitor: number = $state(-1);
@@ -127,7 +140,8 @@
       }
     });
 
-    const u2 = await listen<{ mode: string }>('capture-mode-started', (event) => {
+    const u2 = await listen<{ mode: string; geometry?: OverlayGeometry }>('capture-mode-started', (event) => {
+      if (event.payload.geometry) applyOverlayGeometry(event.payload.geometry);
       mode = event.payload.mode as CaptureMode;
       flowState = 'capturing';
     });
@@ -234,32 +248,12 @@
     entering = true;
     try {
       try {
-        monitors = await invoke<Monitor[]>('get_monitors');
-      } catch {
-        monitors = [];
-      }
-
-      if (monitors.length > 0) {
-        let minX = Infinity;
-        let minY = Infinity;
-        for (const m of monitors) {
-          if (m.x < minX) minX = m.x;
-          if (m.y < minY) minY = m.y;
-        }
-        const d = window.devicePixelRatio || 1;
-        dpr = d;
-        windowOffset = { x: minX / d, y: minY / d };
-        monitors = monitors.map(m => ({
-          ...m,
-          x: m.x / d,
-          y: m.y / d,
-          width: m.width / d,
-          height: m.height / d,
-        }));
-      }
-
-      try {
-        await invoke('start_capture', { mode: m });
+        // start_capture enumerates the monitors used to place the native
+        // window and returns that same physical-coordinate snapshot. This
+        // avoids racing a second monitor enumeration and avoids sampling the
+        // compact window's DPR before the overlay is moved.
+        const geometry = await invoke<OverlayGeometry>('start_capture', { mode: m });
+        applyOverlayGeometry(geometry);
       } catch (err) {
         console.error('start_capture failed:', err);
       }
@@ -286,6 +280,8 @@
     mode = null;
     flowState = 'idle';
     monitors = [];
+    virtualOrigin = { x: 0, y: 0 };
+    overlayScaleFactor = 1;
     cursorMonitor = -1;
     selecting = false;
     movingSelection = false;
@@ -306,18 +302,13 @@
   // ---------------------------------------------------------------------------
 
   function onFullMouseMove(e: MouseEvent) {
-    const sx = e.clientX + windowOffset.x;
-    const sy = e.clientY + windowOffset.y;
-
-    let found = -1;
-    for (let i = 0; i < monitors.length; i++) {
-      const m = monitors[i];
-      if (sx >= m.x && sx < m.x + m.width && sy >= m.y && sy < m.y + m.height) {
-        found = i;
-        break;
-      }
-    }
-    cursorMonitor = found;
+    cursorMonitor = findMonitorAtClient(
+      e.clientX,
+      e.clientY,
+      monitors,
+      virtualOrigin,
+      overlayScaleFactor,
+    );
   }
 
   // ---------------------------------------------------------------------------
@@ -418,11 +409,12 @@
   async function confirmAreaCapture() {
     if (!selectionRect) return;
 
-    const d = window.devicePixelRatio || 1;
-    const x = (selectionRect.left + windowOffset.x) * d;
-    const y = (selectionRect.top + windowOffset.y) * d;
-    const width = selectionRect.width * d;
-    const height = selectionRect.height * d;
+    const physicalSelection = selectionToDesktopCoords(
+      selectionRect,
+      virtualOrigin,
+      overlayScaleFactor,
+    );
+    const { width, height } = physicalSelection;
 
     if (width < 2 || height < 2) {
       await cancelCapture();
@@ -431,10 +423,10 @@
 
     try {
       const result = await invoke<CapturedImage>('capture_area', {
-        x: Math.round(x),
-        y: Math.round(y),
-        width: Math.round(width),
-        height: Math.round(height),
+        x: physicalSelection.x,
+        y: physicalSelection.y,
+        width: physicalSelection.width,
+        height: physicalSelection.height,
       });
       transitionToAnnotation(result);
     } catch (err) {
@@ -537,6 +529,12 @@
   // Helpers
   // ---------------------------------------------------------------------------
 
+  function applyOverlayGeometry(geometry: OverlayGeometry) {
+    monitors = geometry.monitors;
+    virtualOrigin = { x: geometry.origin_x, y: geometry.origin_y };
+    overlayScaleFactor = geometry.scale_factor > 0 ? geometry.scale_factor : 1;
+  }
+
   function fmtRes(w: number, h: number): string {
     return `${w} × ${h}`;
   }
@@ -562,15 +560,14 @@
     <div class="dim"></div>
 
     {#if activeMonitor}
-      {@const mx = activeMonitor.x - windowOffset.x}
-      {@const my = activeMonitor.y - windowOffset.y}
+      {@const monitorRect = monitorToCssRect(activeMonitor, virtualOrigin, overlayScaleFactor)}
       <div
         class="monitor-highlight"
         style="
-          left: {mx}px;
-          top: {my}px;
-          width: {activeMonitor.width}px;
-          height: {activeMonitor.height}px;
+          left: {monitorRect.left}px;
+          top: {monitorRect.top}px;
+          width: {monitorRect.width}px;
+          height: {monitorRect.height}px;
         "
       >
         <div class="monitor-label">
@@ -644,7 +641,7 @@
         "
       >
         <div class="selection-readout">
-          {Math.round(selectionRect.width * dpr)} × {Math.round(selectionRect.height * dpr)}
+          {Math.round(selectionRect.width * overlayScaleFactor)} × {Math.round(selectionRect.height * overlayScaleFactor)}
         </div>
       </div>
     {/if}
@@ -734,6 +731,7 @@
   .monitor-highlight {
     position: absolute;
     border: 3px solid #a78bfa;
+    box-sizing: border-box;
     border-radius: 4px;
     box-shadow: 0 0 20px rgba(167, 139, 250, 0.35), inset 0 0 20px rgba(167, 139, 250, 0.08);
     pointer-events: none;

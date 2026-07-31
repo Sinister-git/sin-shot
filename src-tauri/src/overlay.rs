@@ -28,6 +28,24 @@ pub struct MonitorInfo {
     pub y: i32,
     /// Whether this is the primary monitor.
     pub is_primary: bool,
+    /// Windows per-monitor scale factor. Bounds remain physical pixels.
+    #[serde(default = "default_scale_factor")]
+    pub scale_factor: f64,
+}
+
+/// Physical bounds and scale of the overlay window after placement.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OverlayGeometry {
+    pub monitors: Vec<MonitorInfo>,
+    pub origin_x: i32,
+    pub origin_y: i32,
+    pub width: u32,
+    pub height: u32,
+    pub scale_factor: f64,
+}
+
+fn default_scale_factor() -> f64 {
+    1.0
 }
 
 // ---------------------------------------------------------------------------
@@ -38,11 +56,12 @@ pub struct MonitorInfo {
 /// then emit a `capture-mode-started` event so the frontend can render
 /// the appropriate overlay UI.
 #[tauri::command]
-pub async fn start_capture(app: AppHandle, mode: String) -> Result<(), String> {
+pub async fn start_capture(app: AppHandle, mode: String) -> Result<OverlayGeometry, String> {
     tracing::info!("Starting capture mode: {}", mode);
     let window = get_main_window(&app)?;
 
-    // Compute the bounding box that encompasses all monitors.
+    // Take one native snapshot for both window placement and frontend
+    // rendering. Every coordinate below is a physical desktop pixel.
     let monitors = window.available_monitors().map_err(|e| {
         let msg = format!("failed to enumerate monitors: {e}");
         tracing::error!("{}", msg);
@@ -70,6 +89,15 @@ pub async fn start_capture(app: AppHandle, mode: String) -> Result<(), String> {
 
     let total_width = (max_x - min_x) as u32;
     let total_height = (max_y - min_y) as u32;
+    let primary = window.primary_monitor().map_err(|e| {
+        let msg = format!("primary_monitor: {e}");
+        tracing::error!("{}", msg);
+        msg
+    })?;
+    let monitor_info = monitors
+        .iter()
+        .map(|monitor| monitor_info_from_monitor(monitor, primary.as_ref()))
+        .collect::<Vec<_>>();
 
     // Resize and reposition the window to cover the entire monitor space.
     window
@@ -103,16 +131,30 @@ pub async fn start_capture(app: AppHandle, mode: String) -> Result<(), String> {
         msg
     })?;
 
-    // Notify the frontend which mode to display.
+    // Query after placement: this is the scale used by the overlay webview,
+    // not the compact window's scale before capture began.
+    let geometry = OverlayGeometry {
+        monitors: monitor_info,
+        origin_x: min_x,
+        origin_y: min_y,
+        width: total_width,
+        height: total_height,
+        scale_factor: window.scale_factor().unwrap_or(1.0),
+    };
+
+    // Notify the frontend with the same snapshot used for native placement.
     window
-        .emit("capture-mode-started", serde_json::json!({ "mode": mode }))
+        .emit(
+            "capture-mode-started",
+            serde_json::json!({ "mode": mode, "geometry": geometry }),
+        )
         .map_err(|e| {
             let msg = format!("emit capture-mode-started: {e}");
             tracing::error!("{}", msg);
             msg
         })?;
 
-    Ok(())
+    Ok(geometry)
 }
 
 /// Hide the overlay window and reset it to its default size.
@@ -178,24 +220,7 @@ pub async fn get_monitors(app: AppHandle) -> Result<Vec<MonitorInfo>, String> {
 
     let mut result = Vec::new();
     for m in &monitors {
-        let size = m.size();
-        let pos = m.position();
-        let is_primary = primary.as_ref().is_some_and(|pm| {
-            let pp = pm.position();
-            let ps = pm.size();
-            pp.x == pos.x && pp.y == pos.y && ps.width == size.width && ps.height == size.height
-        });
-        result.push(MonitorInfo {
-            name: m
-                .name()
-                .map(|s| s.to_string())
-                .unwrap_or_else(|| "Unknown".to_string()),
-            width: size.width,
-            height: size.height,
-            x: pos.x,
-            y: pos.y,
-            is_primary,
-        });
+        result.push(monitor_info_from_monitor(m, primary.as_ref()));
     }
 
     Ok(result)
@@ -204,6 +229,29 @@ pub async fn get_monitors(app: AppHandle) -> Result<Vec<MonitorInfo>, String> {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+fn monitor_info_from_monitor(monitor: &Monitor, primary: Option<&Monitor>) -> MonitorInfo {
+    let size = monitor.size();
+    let pos = monitor.position();
+    let is_primary = primary.is_some_and(|pm| {
+        let pp = pm.position();
+        let ps = pm.size();
+        pp.x == pos.x && pp.y == pos.y && ps.width == size.width && ps.height == size.height
+    });
+
+    MonitorInfo {
+        name: monitor
+            .name()
+            .map(ToString::to_string)
+            .unwrap_or_else(|| "Unknown".to_string()),
+        width: size.width,
+        height: size.height,
+        x: pos.x,
+        y: pos.y,
+        is_primary,
+        scale_factor: monitor.scale_factor(),
+    }
+}
 
 /// Get the main (currently the only) Tauri webview window.
 fn get_main_window(app: &AppHandle) -> Result<WebviewWindow, String> {
@@ -228,6 +276,7 @@ mod tests {
             x: 0,
             y: 0,
             is_primary: true,
+            scale_factor: 1.0,
         };
         let json = serde_json::to_string(&info).unwrap();
         assert!(json.contains("DELL U2719D"));
@@ -245,6 +294,7 @@ mod tests {
             x: 2560,
             y: 0,
             is_primary: false,
+            scale_factor: 1.0,
         };
         let json = serde_json::to_string(&info).unwrap();
         assert!(json.contains("\"is_primary\":false"));
@@ -275,6 +325,7 @@ mod tests {
             x: 0,
             y: 0,
             is_primary: true,
+            scale_factor: 1.0,
         }];
         let (min_x, min_y, max_x, max_y) = compute_bounds(&monitors);
         assert_eq!(min_x, 0);
@@ -296,6 +347,7 @@ mod tests {
                 x: 0,
                 y: 0,
                 is_primary: true,
+                scale_factor: 1.0,
             },
             MonitorInfo {
                 name: "Right".into(),
@@ -304,6 +356,7 @@ mod tests {
                 x: 1920,
                 y: 0,
                 is_primary: false,
+                scale_factor: 1.0,
             },
         ];
         let (min_x, min_y, max_x, max_y) = compute_bounds(&monitors);
@@ -326,6 +379,7 @@ mod tests {
                 x: -1920,
                 y: 0,
                 is_primary: false,
+                scale_factor: 1.0,
             },
             MonitorInfo {
                 name: "Primary".into(),
@@ -334,6 +388,7 @@ mod tests {
                 x: 0,
                 y: 0,
                 is_primary: true,
+                scale_factor: 1.0,
             },
         ];
         let (min_x, min_y, max_x, max_y) = compute_bounds(&monitors);
@@ -356,6 +411,7 @@ mod tests {
                 x: 0,
                 y: -1080,
                 is_primary: false,
+                scale_factor: 1.0,
             },
             MonitorInfo {
                 name: "Bottom".into(),
@@ -364,6 +420,7 @@ mod tests {
                 x: 0,
                 y: 0,
                 is_primary: true,
+                scale_factor: 1.0,
             },
         ];
         let (min_x, min_y, max_x, max_y) = compute_bounds(&monitors);
