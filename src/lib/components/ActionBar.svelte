@@ -36,10 +36,9 @@
 
 <style>
   .action-bar {
-    position: absolute;
-    bottom: -52px;
-    left: 50%;
-    transform: translateX(-50%);
+    position: relative;
+    margin-top: 8px;
+    left: auto;
     display: flex;
     gap: 8px;
     z-index: 10;

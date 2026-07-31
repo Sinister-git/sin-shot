@@ -5,6 +5,7 @@
   import Toolbar from './Toolbar.svelte';
   import ActionBar from './ActionBar.svelte';
   import type { Tool } from '$lib/types';
+  import { moveSelection, pointInSelection, type Point, type SelectionRect } from './selection-geometry';
 
   // ---------------------------------------------------------------------------
   // Types
@@ -17,18 +18,6 @@
     x: number;
     y: number;
     is_primary: boolean;
-  }
-
-  interface Point {
-    x: number;
-    y: number;
-  }
-
-  interface SelectionRect {
-    left: number;
-    top: number;
-    width: number;
-    height: number;
   }
 
   type CaptureMode = 'full-monitor' | 'area-select' | null;
@@ -77,8 +66,11 @@
 
   // Area-select mode
   let selecting = $state(false);
+  let movingSelection = $state(false);
   let selStart: Point = $state({ x: 0, y: 0 });
   let selCurrent: Point = $state({ x: 0, y: 0 });
+  let moveStart: Point = $state({ x: 0, y: 0 });
+  let moveOrigin: SelectionRect | null = $state(null);
   let selConfirmed: SelectionRect | null = $state(null);
   let mousePos: Point = $state({ x: 0, y: 0 });
 
@@ -296,6 +288,8 @@
     monitors = [];
     cursorMonitor = -1;
     selecting = false;
+    movingSelection = false;
+    moveOrigin = null;
     selStart = { x: 0, y: 0 };
     selCurrent = { x: 0, y: 0 };
     selConfirmed = null;
@@ -349,21 +343,57 @@
   // Area-select mode — mouse handlers
   // ---------------------------------------------------------------------------
 
-  function onAreaMouseDown(e: MouseEvent) {
-    if (e.button !== 0) return;
-    selecting = true;
-    selStart = { x: e.clientX, y: e.clientY };
-    selCurrent = { x: e.clientX, y: e.clientY };
+  function areaBounds(target: EventTarget | null): { width: number; height: number } {
+    const overlay = target as HTMLElement | null;
+    return {
+      width: overlay?.clientWidth || window.innerWidth,
+      height: overlay?.clientHeight || window.innerHeight,
+    };
   }
 
-  function onAreaMouseMove(e: MouseEvent) {
+  function onAreaPointerDown(e: PointerEvent) {
+    if (e.button !== 0) return;
+    const point = { x: e.clientX, y: e.clientY };
+    const overlay = e.currentTarget as HTMLElement;
+    overlay.setPointerCapture?.(e.pointerId);
+
+    if (selConfirmed && pointInSelection(point, selConfirmed)) {
+      movingSelection = true;
+      moveStart = point;
+      moveOrigin = { ...selConfirmed };
+      return;
+    }
+
+    movingSelection = false;
+    moveOrigin = null;
+    selecting = true;
+    selConfirmed = null;
+    selStart = point;
+    selCurrent = point;
+  }
+
+  function onAreaPointerMove(e: PointerEvent) {
     mousePos = { x: e.clientX, y: e.clientY };
     if (selecting) {
       selCurrent = { x: e.clientX, y: e.clientY };
+    } else if (movingSelection && moveOrigin) {
+      selConfirmed = moveSelection(
+        moveOrigin,
+        { x: e.clientX - moveStart.x, y: e.clientY - moveStart.y },
+        areaBounds(e.currentTarget),
+      );
     }
   }
 
-  function onAreaMouseUp(_e: MouseEvent) {
+  function onAreaPointerUp(e: PointerEvent) {
+    const overlay = e.currentTarget as HTMLElement;
+    overlay.releasePointerCapture?.(e.pointerId);
+
+    if (movingSelection) {
+      movingSelection = false;
+      moveOrigin = null;
+      return;
+    }
     if (!selecting) return;
     selecting = false;
 
@@ -567,11 +597,30 @@
     class="overlay-area"
     role="application"
     aria-label="Select capture area"
-    onmousedown={onAreaMouseDown}
-    onmousemove={onAreaMouseMove}
-    onmouseup={onAreaMouseUp}
+    onpointerdown={onAreaPointerDown}
+    onpointermove={onAreaPointerMove}
+    onpointerup={onAreaPointerUp}
+    onpointercancel={onAreaPointerUp}
   >
-    <div class="dim"></div>
+    {#if !selectionRect || selectionRect.width < 1 || selectionRect.height < 1}
+      <div class="dim"></div>
+    {:else}
+      <svg class="selection-mask" aria-hidden="true">
+        <defs>
+          <mask id="selection-cutout" maskUnits="userSpaceOnUse" maskContentUnits="userSpaceOnUse" x="0" y="0" width="100%" height="100%">
+            <rect width="100%" height="100%" fill="white" />
+            <rect
+              x={selectionRect.left}
+              y={selectionRect.top}
+              width={selectionRect.width}
+              height={selectionRect.height}
+              fill="black"
+            />
+          </mask>
+        </defs>
+        <rect width="100%" height="100%" fill="rgba(0, 0, 0, 0.55)" mask="url(#selection-cutout)" />
+      </svg>
+    {/if}
 
     {#if !selecting && !selectionRect}
       <div
@@ -583,9 +632,10 @@
       </div>
     {/if}
 
-    {#if selectionRect}
+    {#if selectionRect && selectionRect.width >= 1 && selectionRect.height >= 1}
       <div
         class="selection-box"
+        class:moving={movingSelection}
         style="
           left: {selectionRect.left}px;
           top: {selectionRect.top}px;
@@ -610,21 +660,25 @@
     <!-- Dark backdrop -->
     <div class="annotation-backdrop"></div>
 
-    <div class="annotation-layout">
-      <div class="annotation-image-container">
-        {#if capturedImage}
-          <AnnotationCanvas
-            bind:this={annotationCanvas}
-            imageData={capturedImage.data}
-            imageWidth={capturedImage.width}
-            imageHeight={capturedImage.height}
-            tool={currentTool}
-            color={currentColor}
-          />
-        {/if}
+    <div
+      class="annotation-layout"
+      style="--image-ratio: {capturedImage.width / capturedImage.height};"
+    >
+      <div class="annotation-stage">
+        <div class="annotation-image-container">
+          {#if capturedImage}
+            <AnnotationCanvas
+              bind:this={annotationCanvas}
+              imageData={capturedImage.data}
+              imageWidth={capturedImage.width}
+              imageHeight={capturedImage.height}
+              tool={currentTool}
+              color={currentColor}
+            />
+          {/if}
+        </div>
+        <Toolbar bind:activeTool={currentTool} bind:color={currentColor} {flashTool} />
       </div>
-
-      <Toolbar bind:activeTool={currentTool} bind:color={currentColor} {flashTool} />
 
       <ActionBar
         onCopy={handleCopy}
@@ -768,14 +822,28 @@
     backdrop-filter: blur(4px);
   }
 
+  .selection-mask {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 1000;
+  }
+
   .selection-box {
     position: fixed;
     border: 2px dashed #a78bfa;
     border-radius: 2px;
+    box-sizing: border-box;
     background: transparent;
-    box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.55);
-    pointer-events: none;
+    pointer-events: all;
+    cursor: move;
     z-index: 1001;
+  }
+
+  .selection-box.moving {
+    cursor: grabbing;
   }
 
   .selection-readout {
@@ -818,19 +886,24 @@
   .annotation-layout {
     position: relative;
     display: flex;
+    flex-direction: column;
     align-items: center;
-    justify-content: center;
     max-width: 95vw;
     max-height: 92vh;
     z-index: 1;
   }
 
-  .annotation-image-container {
+  .annotation-stage {
     position: relative;
+    width: min(calc(95vw - 120px), calc((92vh - 80px) * var(--image-ratio)));
+    aspect-ratio: var(--image-ratio);
+    flex: 0 1 auto;
+  }
+
+  .annotation-image-container {
+    position: absolute;
+    inset: 0;
     pointer-events: all;
-    /* Constrain to viewport with padding for toolbar and action bar */
-    max-width: calc(95vw - 120px);
-    max-height: calc(92vh - 80px);
     overflow: hidden;
     border-radius: 4px;
     box-shadow: 0 0 40px rgba(0, 0, 0, 0.6);
