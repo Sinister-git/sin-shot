@@ -497,6 +497,11 @@
     try {
       await invoke('hide_capture_overlay');
       overlayHidden = true;
+      if (
+        captureGeneration !== gen ||
+        (flowState !== 'annotating' && flowState !== 'uploading') ||
+        mode !== 'area-select'
+      ) return null;
       const result = await invoke<CapturedImage>('capture_area', {
         x: physicalSelection.x,
         y: physicalSelection.y,
@@ -509,7 +514,12 @@
       console.error('capture_area failed:', err);
       return null;
     } finally {
-      if (overlayHidden) {
+      if (
+        overlayHidden &&
+        captureGeneration === gen &&
+        (flowState === 'annotating' || flowState === 'uploading') &&
+        mode === 'area-select'
+      ) {
         try {
           await invoke('show_capture_overlay');
         } catch (err) {
