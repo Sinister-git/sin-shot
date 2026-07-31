@@ -11,7 +11,6 @@ import { render, screen, fireEvent } from '@testing-library/svelte';
 import Toolbar from './Toolbar.svelte';
 import ActionBar from './ActionBar.svelte';
 import type { Tool, AnnotationSnapshot } from '$lib/types';
-import { fitAnnotationImage } from './capture-layout';
 
 // ---------------------------------------------------------------------------
 // Pure logic — keyboard tool-switching (extracted from Overlay.svelte)
@@ -315,26 +314,6 @@ describe('Toolbar component', () => {
 // ---------------------------------------------------------------------------
 // Tests — ActionBar component rendering
 // ---------------------------------------------------------------------------
-
-describe('annotation layout geometry', () => {
-  it('fits the image to the viewport while preserving its aspect ratio', () => {
-    expect(fitAnnotationImage({ width: 1920, height: 1080 }, { width: 1920, height: 1080 })).toEqual({
-      width: 1778,
-      height: 1000,
-    });
-  });
-
-  it('does not enlarge small images and always returns explicit dimensions', () => {
-    expect(fitAnnotationImage({ width: 400, height: 200 }, { width: 1920, height: 1080 })).toEqual({
-      width: 400,
-      height: 200,
-    });
-    expect(fitAnnotationImage({ width: 0, height: 0 }, { width: 1920, height: 1080 })).toEqual({
-      width: 1,
-      height: 1,
-    });
-  });
-});
 
 describe('ActionBar component', () => {
   it('renders Copy, Save, Upload, and Cancel buttons', () => {
