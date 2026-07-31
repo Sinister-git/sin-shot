@@ -8,6 +8,12 @@
  */
 
 import { moveSelection, pointInSelection } from "./selection-geometry";
+import {
+  findMonitorAtClient,
+  monitorToCssRect,
+  selectionToDesktopCoords as nativeSelectionToDesktopCoords,
+  type PhysicalMonitor,
+} from "./monitor-geometry";
 
 // ---------------------------------------------------------------------------
 // Types (mirror Overlay.svelte)
@@ -20,6 +26,7 @@ interface Monitor {
   x: number;
   y: number;
   is_primary: boolean;
+  scale_factor: number;
 }
 
 interface Point {
@@ -100,7 +107,7 @@ function computeSelectionRect(start: Point, current: Point): SelectionRect {
  * Convert a window-relative selection rect (CSS pixels) to absolute
  * physical desktop coordinates for the capture backend.
  */
-function selectionToDesktopCoords(
+function legacySelectionToDesktopCoords(
   sel: SelectionRect,
   windowOffset: Point,
   dpr: number,
@@ -117,10 +124,43 @@ function selectionToDesktopCoords(
 // Tests
 // ---------------------------------------------------------------------------
 
+describe("native monitor geometry", () => {
+  const monitors: PhysicalMonitor[] = [
+    { name: "Left", width: 2560, height: 1440, x: -2560, y: 120, is_primary: false, scale_factor: 1.25 },
+    { name: "Primary", width: 3840, height: 2160, x: 0, y: 0, is_primary: true, scale_factor: 2 },
+    { name: "Right", width: 1920, height: 1080, x: 3840, y: 420, is_primary: false, scale_factor: 1 },
+  ];
+
+  it("renders physical monitor bounds using the placed overlay scale", () => {
+    expect(monitorToCssRect(monitors[0], { x: -2560, y: 0 }, 2)).toEqual({
+      left: 0, top: 60, width: 1280, height: 720,
+    });
+    expect(monitorToCssRect(monitors[2], { x: -2560, y: 0 }, 2)).toEqual({
+      left: 3200, top: 210, width: 960, height: 540,
+    });
+  });
+
+  it("finds monitors across negative origins, vertical offsets, and gaps", () => {
+    const origin = { x: -2560, y: 0 };
+    expect(findMonitorAtClient(100, 100, monitors, origin, 2)).toBe(0);
+    expect(findMonitorAtClient(100, 50, monitors, origin, 2)).toBe(-1); // vertical gap
+    expect(findMonitorAtClient(3000, 250, monitors, origin, 2)).toBe(1);
+    expect(findMonitorAtClient(3400, 300, monitors, origin, 2)).toBe(2);
+  });
+
+  it("converts CSS selection to physical coordinates without per-monitor scale mixing", () => {
+    expect(nativeSelectionToDesktopCoords(
+      { left: 1280, top: 210, width: 960, height: 540 },
+      { x: -2560, y: 0 },
+      2,
+    )).toEqual({ x: 0, y: 420, width: 1920, height: 1080 });
+  });
+});
+
 describe("normalizeMonitors", () => {
   it("handles a single 1920×1080 monitor at (0,0) with DPR=1", () => {
     const monitors: Monitor[] = [
-      { name: "Main", width: 1920, height: 1080, x: 0, y: 0, is_primary: true },
+      { name: "Main", width: 1920, height: 1080, x: 0, y: 0, is_primary: true, scale_factor: 1 },
     ];
     const result = normalizeMonitors(monitors, 1);
     expect(result.windowOffset).toEqual({ x: 0, y: 0 });
@@ -130,7 +170,7 @@ describe("normalizeMonitors", () => {
 
   it("handles dual monitors side-by-side", () => {
     const monitors: Monitor[] = [
-      { name: "Left", width: 1920, height: 1080, x: 0, y: 0, is_primary: true },
+      { name: "Left", width: 1920, height: 1080, x: 0, y: 0, is_primary: true, scale_factor: 1 },
       {
         name: "Right",
         width: 1920,
@@ -138,6 +178,7 @@ describe("normalizeMonitors", () => {
         x: 1920,
         y: 0,
         is_primary: false,
+        scale_factor: 1,
       },
     ];
     const result = normalizeMonitors(monitors, 1);
@@ -155,6 +196,7 @@ describe("normalizeMonitors", () => {
         x: -1920,
         y: 0,
         is_primary: false,
+        scale_factor: 1,
       },
       {
         name: "Primary",
@@ -163,6 +205,7 @@ describe("normalizeMonitors", () => {
         x: 0,
         y: 0,
         is_primary: true,
+        scale_factor: 1,
       },
     ];
     const result = normalizeMonitors(monitors, 1);
@@ -175,7 +218,7 @@ describe("normalizeMonitors", () => {
 
   it("handles DPR=2 (Retina/HiDPI)", () => {
     const monitors: Monitor[] = [
-      { name: "4K", width: 3840, height: 2160, x: 0, y: 0, is_primary: true },
+      { name: "4K", width: 3840, height: 2160, x: 0, y: 0, is_primary: true, scale_factor: 2 }
     ];
     const result = normalizeMonitors(monitors, 2);
     expect(result.windowOffset).toEqual({ x: 0, y: 0 });
@@ -194,6 +237,7 @@ describe("findMonitor", () => {
       x: 0,
       y: 0,
       is_primary: true,
+      scale_factor: 1,
     },
     {
       name: "Right",
@@ -202,6 +246,7 @@ describe("findMonitor", () => {
       x: 1920,
       y: 0,
       is_primary: false,
+      scale_factor: 1,
     },
   ];
 
@@ -229,6 +274,7 @@ describe("findMonitor", () => {
         x: -1920,
         y: 0,
         is_primary: false,
+        scale_factor: 1,
       },
       {
         name: "Right",
@@ -237,6 +283,7 @@ describe("findMonitor", () => {
         x: 0,
         y: 0,
         is_primary: true,
+        scale_factor: 1,
       },
     ];
     const offset = { x: -1920, y: 0 };
@@ -272,13 +319,13 @@ describe("computeSelectionRect", () => {
 describe("selectionToDesktopCoords", () => {
   it("converts CSS-pixel selection to physical coords at DPR=1", () => {
     const sel: SelectionRect = { left: 100, top: 50, width: 400, height: 300 };
-    const result = selectionToDesktopCoords(sel, { x: 0, y: 0 }, 1);
+    const result = legacySelectionToDesktopCoords(sel, { x: 0, y: 0 }, 1);
     expect(result).toEqual({ x: 100, y: 50, width: 400, height: 300 });
   });
 
   it("converts with DPR=2", () => {
     const sel: SelectionRect = { left: 100, top: 50, width: 400, height: 300 };
-    const result = selectionToDesktopCoords(sel, { x: 0, y: 0 }, 2);
+    const result = legacySelectionToDesktopCoords(sel, { x: 0, y: 0 }, 2);
     expect(result).toEqual({ x: 200, y: 100, width: 800, height: 600 });
   });
 
@@ -286,7 +333,7 @@ describe("selectionToDesktopCoords", () => {
     // Monitor at x=-1920 in screen coords, windowOffset.x = -1920.
     // Selection at window-relative (200, 100) => screen (-1720, 100).
     const sel: SelectionRect = { left: 200, top: 100, width: 800, height: 600 };
-    const result = selectionToDesktopCoords(sel, { x: -1920, y: 0 }, 1);
+    const result = legacySelectionToDesktopCoords(sel, { x: -1920, y: 0 }, 1);
     expect(result).toEqual({ x: -1720, y: 100, width: 800, height: 600 });
   });
 
@@ -297,7 +344,7 @@ describe("selectionToDesktopCoords", () => {
       width: 400.4,
       height: 299.8,
     };
-    const result = selectionToDesktopCoords(sel, { x: 0, y: 0 }, 1.5);
+    const result = legacySelectionToDesktopCoords(sel, { x: 0, y: 0 }, 1.5);
     expect(result.x).toBe(151); // (100.7 + 0) * 1.5 = 151.05 -> 151
     expect(result.y).toBe(75); // (50.2 + 0) * 1.5 = 75.3 -> 75
     expect(result.width).toBe(601); // 400.4 * 1.5 = 600.6 -> 601
