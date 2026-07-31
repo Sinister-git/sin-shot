@@ -7,7 +7,7 @@
  * requiring a DOM or Tauri runtime.
  */
 
-import { moveSelection, pointInSelection } from './selection-geometry';
+import { moveSelection, pointInSelection } from "./selection-geometry";
 
 // ---------------------------------------------------------------------------
 // Types (mirror Overlay.svelte)
@@ -117,10 +117,10 @@ function selectionToDesktopCoords(
 // Tests
 // ---------------------------------------------------------------------------
 
-describe('normalizeMonitors', () => {
-  it('handles a single 1920×1080 monitor at (0,0) with DPR=1', () => {
+describe("normalizeMonitors", () => {
+  it("handles a single 1920×1080 monitor at (0,0) with DPR=1", () => {
     const monitors: Monitor[] = [
-      { name: 'Main', width: 1920, height: 1080, x: 0, y: 0, is_primary: true },
+      { name: "Main", width: 1920, height: 1080, x: 0, y: 0, is_primary: true },
     ];
     const result = normalizeMonitors(monitors, 1);
     expect(result.windowOffset).toEqual({ x: 0, y: 0 });
@@ -128,10 +128,17 @@ describe('normalizeMonitors', () => {
     expect(result.monitors[0].width).toBe(1920);
   });
 
-  it('handles dual monitors side-by-side', () => {
+  it("handles dual monitors side-by-side", () => {
     const monitors: Monitor[] = [
-      { name: 'Left', width: 1920, height: 1080, x: 0, y: 0, is_primary: true },
-      { name: 'Right', width: 1920, height: 1080, x: 1920, y: 0, is_primary: false },
+      { name: "Left", width: 1920, height: 1080, x: 0, y: 0, is_primary: true },
+      {
+        name: "Right",
+        width: 1920,
+        height: 1080,
+        x: 1920,
+        y: 0,
+        is_primary: false,
+      },
     ];
     const result = normalizeMonitors(monitors, 1);
     expect(result.windowOffset).toEqual({ x: 0, y: 0 });
@@ -139,10 +146,24 @@ describe('normalizeMonitors', () => {
     expect(result.monitors[1].x).toBe(1920);
   });
 
-  it('handles negative monitor offset (secondary left of primary)', () => {
+  it("handles negative monitor offset (secondary left of primary)", () => {
     const monitors: Monitor[] = [
-      { name: 'Left', width: 1920, height: 1080, x: -1920, y: 0, is_primary: false },
-      { name: 'Primary', width: 2560, height: 1440, x: 0, y: 0, is_primary: true },
+      {
+        name: "Left",
+        width: 1920,
+        height: 1080,
+        x: -1920,
+        y: 0,
+        is_primary: false,
+      },
+      {
+        name: "Primary",
+        width: 2560,
+        height: 1440,
+        x: 0,
+        y: 0,
+        is_primary: true,
+      },
     ];
     const result = normalizeMonitors(monitors, 1);
     // Window offset should be the leftmost monitor's x coord.
@@ -152,9 +173,9 @@ describe('normalizeMonitors', () => {
     expect(result.monitors[1].x).toBe(0);
   });
 
-  it('handles DPR=2 (Retina/HiDPI)', () => {
+  it("handles DPR=2 (Retina/HiDPI)", () => {
     const monitors: Monitor[] = [
-      { name: '4K', width: 3840, height: 2160, x: 0, y: 0, is_primary: true },
+      { name: "4K", width: 3840, height: 2160, x: 0, y: 0, is_primary: true },
     ];
     const result = normalizeMonitors(monitors, 2);
     expect(result.windowOffset).toEqual({ x: 0, y: 0 });
@@ -164,31 +185,59 @@ describe('normalizeMonitors', () => {
   });
 });
 
-describe('findMonitor', () => {
+describe("findMonitor", () => {
   const monitors: Monitor[] = [
-    { name: 'Primary', width: 1920, height: 1080, x: 0, y: 0, is_primary: true },
-    { name: 'Right', width: 1920, height: 1080, x: 1920, y: 0, is_primary: false },
+    {
+      name: "Primary",
+      width: 1920,
+      height: 1080,
+      x: 0,
+      y: 0,
+      is_primary: true,
+    },
+    {
+      name: "Right",
+      width: 1920,
+      height: 1080,
+      x: 1920,
+      y: 0,
+      is_primary: false,
+    },
   ];
 
-  it('finds cursor on primary monitor', () => {
+  it("finds cursor on primary monitor", () => {
     const idx = findMonitor(500, 300, monitors, { x: 0, y: 0 });
     expect(idx).toBe(0);
   });
 
-  it('finds cursor on secondary monitor', () => {
+  it("finds cursor on secondary monitor", () => {
     const idx = findMonitor(2500, 500, monitors, { x: 0, y: 0 });
     expect(idx).toBe(1);
   });
 
-  it('returns -1 when cursor is outside all monitors', () => {
+  it("returns -1 when cursor is outside all monitors", () => {
     const idx = findMonitor(5000, 5000, monitors, { x: 0, y: 0 });
     expect(idx).toBe(-1);
   });
 
-  it('accounts for window offset with negative monitor x', () => {
+  it("accounts for window offset with negative monitor x", () => {
     const negMonitors: Monitor[] = [
-      { name: 'Left', width: 1920, height: 1080, x: -1920, y: 0, is_primary: false },
-      { name: 'Right', width: 2560, height: 1440, x: 0, y: 0, is_primary: true },
+      {
+        name: "Left",
+        width: 1920,
+        height: 1080,
+        x: -1920,
+        y: 0,
+        is_primary: false,
+      },
+      {
+        name: "Right",
+        width: 2560,
+        height: 1440,
+        x: 0,
+        y: 0,
+        is_primary: true,
+      },
     ];
     const offset = { x: -1920, y: 0 };
     // Cursor at window-relative (500, 300) => screen (-1420, 300) => should be on Left monitor
@@ -198,42 +247,42 @@ describe('findMonitor', () => {
   });
 });
 
-describe('computeSelectionRect', () => {
-  it('creates rect from top-left to bottom-right drag', () => {
+describe("computeSelectionRect", () => {
+  it("creates rect from top-left to bottom-right drag", () => {
     const rect = computeSelectionRect({ x: 100, y: 100 }, { x: 500, y: 400 });
     expect(rect).toEqual({ left: 100, top: 100, width: 400, height: 300 });
   });
 
-  it('handles bottom-right to top-left drag (negative direction)', () => {
+  it("handles bottom-right to top-left drag (negative direction)", () => {
     const rect = computeSelectionRect({ x: 500, y: 400 }, { x: 100, y: 100 });
     expect(rect).toEqual({ left: 100, top: 100, width: 400, height: 300 });
   });
 
-  it('handles top-right to bottom-left drag', () => {
+  it("handles top-right to bottom-left drag", () => {
     const rect = computeSelectionRect({ x: 500, y: 100 }, { x: 100, y: 400 });
     expect(rect).toEqual({ left: 100, top: 100, width: 400, height: 300 });
   });
 
-  it('returns zero-size rect for click (no drag)', () => {
+  it("returns zero-size rect for click (no drag)", () => {
     const rect = computeSelectionRect({ x: 100, y: 100 }, { x: 100, y: 100 });
     expect(rect).toEqual({ left: 100, top: 100, width: 0, height: 0 });
   });
 });
 
-describe('selectionToDesktopCoords', () => {
-  it('converts CSS-pixel selection to physical coords at DPR=1', () => {
+describe("selectionToDesktopCoords", () => {
+  it("converts CSS-pixel selection to physical coords at DPR=1", () => {
     const sel: SelectionRect = { left: 100, top: 50, width: 400, height: 300 };
     const result = selectionToDesktopCoords(sel, { x: 0, y: 0 }, 1);
     expect(result).toEqual({ x: 100, y: 50, width: 400, height: 300 });
   });
 
-  it('converts with DPR=2', () => {
+  it("converts with DPR=2", () => {
     const sel: SelectionRect = { left: 100, top: 50, width: 400, height: 300 };
     const result = selectionToDesktopCoords(sel, { x: 0, y: 0 }, 2);
     expect(result).toEqual({ x: 200, y: 100, width: 800, height: 600 });
   });
 
-  it('accounts for window offset (negative monitor origin)', () => {
+  it("accounts for window offset (negative monitor origin)", () => {
     // Monitor at x=-1920 in screen coords, windowOffset.x = -1920.
     // Selection at window-relative (200, 100) => screen (-1720, 100).
     const sel: SelectionRect = { left: 200, top: 100, width: 800, height: 600 };
@@ -241,8 +290,13 @@ describe('selectionToDesktopCoords', () => {
     expect(result).toEqual({ x: -1720, y: 100, width: 800, height: 600 });
   });
 
-  it('rounds fractional coordinates', () => {
-    const sel: SelectionRect = { left: 100.7, top: 50.2, width: 400.4, height: 299.8 };
+  it("rounds fractional coordinates", () => {
+    const sel: SelectionRect = {
+      left: 100.7,
+      top: 50.2,
+      width: 400.4,
+      height: 299.8,
+    };
     const result = selectionToDesktopCoords(sel, { x: 0, y: 0 }, 1.5);
     expect(result.x).toBe(151); // (100.7 + 0) * 1.5 = 151.05 -> 151
     expect(result.y).toBe(75); // (50.2 + 0) * 1.5 = 75.3 -> 75
@@ -251,18 +305,20 @@ describe('selectionToDesktopCoords', () => {
   });
 });
 
-describe('movable selection geometry', () => {
+describe("movable selection geometry", () => {
   const selection = { left: 100, top: 80, width: 300, height: 200 };
 
-  it('recognizes points inside the completed selection', () => {
+  it("recognizes points inside the completed selection", () => {
     expect(pointInSelection({ x: 100, y: 80 }, selection)).toBe(true);
     expect(pointInSelection({ x: 250, y: 180 }, selection)).toBe(true);
     expect(pointInSelection({ x: 401, y: 180 }, selection)).toBe(false);
     expect(pointInSelection({ x: 250, y: 281 }, selection)).toBe(false);
   });
 
-  it('moves a selection by the pointer delta', () => {
-    expect(moveSelection(selection, { x: 25, y: -30 }, { width: 1000, height: 800 })).toEqual({
+  it("moves a selection by the pointer delta", () => {
+    expect(
+      moveSelection(selection, { x: 25, y: -30 }, { width: 1000, height: 800 }),
+    ).toEqual({
       left: 125,
       top: 50,
       width: 300,
@@ -270,19 +326,37 @@ describe('movable selection geometry', () => {
     });
   });
 
-  it('clamps movement to every overlay edge', () => {
-    expect(moveSelection(selection, { x: -500, y: -500 }, { width: 1000, height: 800 })).toMatchObject({
+  it("clamps movement to every overlay edge", () => {
+    expect(
+      moveSelection(
+        selection,
+        { x: -500, y: -500 },
+        { width: 1000, height: 800 },
+      ),
+    ).toMatchObject({
       left: 0,
       top: 0,
     });
-    expect(moveSelection(selection, { x: 1000, y: 1000 }, { width: 1000, height: 800 })).toMatchObject({
+    expect(
+      moveSelection(
+        selection,
+        { x: 1000, y: 1000 },
+        { width: 1000, height: 800 },
+      ),
+    ).toMatchObject({
       left: 700,
       top: 600,
     });
   });
 
-  it('keeps a selection at the origin when it is larger than the overlay', () => {
-    expect(moveSelection({ left: 0, top: 0, width: 1200, height: 900 }, { x: 50, y: 50 }, { width: 1000, height: 800 })).toEqual({
+  it("keeps a selection at the origin when it is larger than the overlay", () => {
+    expect(
+      moveSelection(
+        { left: 0, top: 0, width: 1200, height: 900 },
+        { x: 50, y: 50 },
+        { width: 1000, height: 800 },
+      ),
+    ).toEqual({
       left: 0,
       top: 0,
       width: 1200,
@@ -291,8 +365,8 @@ describe('movable selection geometry', () => {
   });
 });
 
-describe('selection persistence after mouseup (minimum size check)', () => {
-  it('rejects selections with any dimension smaller than 2 pixels', () => {
+describe("selection persistence after mouseup (minimum size check)", () => {
+  it("rejects selections with any dimension smaller than 2 pixels", () => {
     // This mirrors the logic: if w < 2 || h < 2, selection is null.
     function isTooSmall(sel: SelectionRect): boolean {
       return sel.width < 2 || sel.height < 2;
@@ -309,7 +383,7 @@ describe('selection persistence after mouseup (minimum size check)', () => {
 // Dynamic hotkey combo comparison (mirrors Overlay.svelte event handler)
 // ---------------------------------------------------------------------------
 
-describe('dynamic hotkey combo comparison', () => {
+describe("dynamic hotkey combo comparison", () => {
   /**
    * Pure function that mirrors the hotkey-pressed event handler logic
    * in Overlay.svelte. Instead of hardcoding 'Ctrl+Shift+1'/'Ctrl+Shift+2',
@@ -319,48 +393,72 @@ describe('dynamic hotkey combo comparison', () => {
     combo: string,
     hotkeyFull: string,
     hotkeyArea: string,
-  ): 'full-monitor' | 'area-select' | null {
-    if (combo === hotkeyFull) return 'full-monitor';
-    if (combo === hotkeyArea) return 'area-select';
+  ): "full-monitor" | "area-select" | null {
+    if (combo === hotkeyFull) return "full-monitor";
+    if (combo === hotkeyArea) return "area-select";
     return null;
   }
 
-  it('matches default hotkeys', () => {
-    expect(resolveCaptureMode('Ctrl+Shift+1', 'Ctrl+Shift+1', 'Ctrl+Shift+2')).toBe('full-monitor');
-    expect(resolveCaptureMode('Ctrl+Shift+2', 'Ctrl+Shift+1', 'Ctrl+Shift+2')).toBe('area-select');
+  it("matches default hotkeys", () => {
+    expect(
+      resolveCaptureMode("Ctrl+Shift+1", "Ctrl+Shift+1", "Ctrl+Shift+2"),
+    ).toBe("full-monitor");
+    expect(
+      resolveCaptureMode("Ctrl+Shift+2", "Ctrl+Shift+1", "Ctrl+Shift+2"),
+    ).toBe("area-select");
   });
 
-  it('matches custom hotkeys loaded from settings', () => {
+  it("matches custom hotkeys loaded from settings", () => {
     // Simulates settings returning Ctrl+Shift+F for full, Ctrl+Shift+A for area
-    const hotkeyFull = 'Ctrl+Shift+F';
-    const hotkeyArea = 'Ctrl+Shift+A';
+    const hotkeyFull = "Ctrl+Shift+F";
+    const hotkeyArea = "Ctrl+Shift+A";
 
-    expect(resolveCaptureMode('Ctrl+Shift+F', hotkeyFull, hotkeyArea)).toBe('full-monitor');
-    expect(resolveCaptureMode('Ctrl+Shift+A', hotkeyFull, hotkeyArea)).toBe('area-select');
-    expect(resolveCaptureMode('Ctrl+Shift+1', hotkeyFull, hotkeyArea)).toBeNull();
-    expect(resolveCaptureMode('Ctrl+Shift+2', hotkeyFull, hotkeyArea)).toBeNull();
+    expect(resolveCaptureMode("Ctrl+Shift+F", hotkeyFull, hotkeyArea)).toBe(
+      "full-monitor",
+    );
+    expect(resolveCaptureMode("Ctrl+Shift+A", hotkeyFull, hotkeyArea)).toBe(
+      "area-select",
+    );
+    expect(
+      resolveCaptureMode("Ctrl+Shift+1", hotkeyFull, hotkeyArea),
+    ).toBeNull();
+    expect(
+      resolveCaptureMode("Ctrl+Shift+2", hotkeyFull, hotkeyArea),
+    ).toBeNull();
   });
 
-  it('returns null for unrecognized combos', () => {
-    expect(resolveCaptureMode('Alt+F4', 'Ctrl+Shift+1', 'Ctrl+Shift+2')).toBeNull();
-    expect(resolveCaptureMode('Ctrl+C', 'Ctrl+Shift+1', 'Ctrl+Shift+2')).toBeNull();
+  it("returns null for unrecognized combos", () => {
+    expect(
+      resolveCaptureMode("Alt+F4", "Ctrl+Shift+1", "Ctrl+Shift+2"),
+    ).toBeNull();
+    expect(
+      resolveCaptureMode("Ctrl+C", "Ctrl+Shift+1", "Ctrl+Shift+2"),
+    ).toBeNull();
   });
 
-  it('updates combos dynamically (simulating settings-changed event)', () => {
+  it("updates combos dynamically (simulating settings-changed event)", () => {
     // Initial state
-    let hotkeyFull = 'Ctrl+Shift+1';
-    let hotkeyArea = 'Ctrl+Shift+2';
+    let hotkeyFull = "Ctrl+Shift+1";
+    let hotkeyArea = "Ctrl+Shift+2";
 
-    expect(resolveCaptureMode('Ctrl+Shift+1', hotkeyFull, hotkeyArea)).toBe('full-monitor');
+    expect(resolveCaptureMode("Ctrl+Shift+1", hotkeyFull, hotkeyArea)).toBe(
+      "full-monitor",
+    );
 
     // Simulate receiving a settings-changed event
-    hotkeyFull = 'Ctrl+Shift+F';
-    hotkeyArea = 'Ctrl+Shift+A';
+    hotkeyFull = "Ctrl+Shift+F";
+    hotkeyArea = "Ctrl+Shift+A";
 
     // Old combo should no longer match
-    expect(resolveCaptureMode('Ctrl+Shift+1', hotkeyFull, hotkeyArea)).toBeNull();
+    expect(
+      resolveCaptureMode("Ctrl+Shift+1", hotkeyFull, hotkeyArea),
+    ).toBeNull();
     // New combo should match
-    expect(resolveCaptureMode('Ctrl+Shift+F', hotkeyFull, hotkeyArea)).toBe('full-monitor');
-    expect(resolveCaptureMode('Ctrl+Shift+A', hotkeyFull, hotkeyArea)).toBe('area-select');
+    expect(resolveCaptureMode("Ctrl+Shift+F", hotkeyFull, hotkeyArea)).toBe(
+      "full-monitor",
+    );
+    expect(resolveCaptureMode("Ctrl+Shift+A", hotkeyFull, hotkeyArea)).toBe(
+      "area-select",
+    );
   });
 });

@@ -16,7 +16,10 @@ export interface Bounds {
 }
 
 /** Return true when a pointer is inside the completed selection. */
-export function pointInSelection(point: Point, selection: SelectionRect): boolean {
+export function pointInSelection(
+  point: Point,
+  selection: SelectionRect,
+): boolean {
   return (
     point.x >= selection.left &&
     point.x <= selection.left + selection.width &&
