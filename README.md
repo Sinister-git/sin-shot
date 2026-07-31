@@ -19,3 +19,10 @@ cargo tauri dev
 # Build for Windows
 cargo tauri build
 ```
+
+## Validation note
+
+The Rust unit tests cover hotkey ownership and rollback bookkeeping on every
+platform, but the native `RegisterHotKey`/`UnregisterHotKey` message-window
+lifecycle can only be validated on Windows. A Windows run is still required to
+verify OS-level release and rebind behavior; F11-to-F10 is one regression case.

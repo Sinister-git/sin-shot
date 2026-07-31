@@ -10,6 +10,62 @@
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 
+#[cfg(any(target_os = "windows", test))]
+use std::collections::HashMap;
+
+/// Tracks the native ID owned by each combo.
+///
+/// The mapping is updated only after the corresponding native operation has
+/// been acknowledged. Keeping this bookkeeping separate makes the ownership
+/// rules testable without requiring a Windows message-only window.
+#[cfg(any(target_os = "windows", test))]
+#[derive(Debug, Default)]
+struct ComboRegistry {
+    ids: HashMap<String, i32>,
+}
+
+#[cfg(any(target_os = "windows", test))]
+impl ComboRegistry {
+    fn id_for(&self, combo: &str) -> Option<i32> {
+        self.ids.get(combo).copied()
+    }
+
+    fn complete_registration(
+        &mut self,
+        combo: &str,
+        id: i32,
+        native_result: Result<(), String>,
+    ) -> Result<(), String> {
+        if self.ids.contains_key(combo) {
+            return Err(format!("hotkey already registered: {combo}"));
+        }
+        native_result?;
+        self.ids.insert(combo.to_string(), id);
+        Ok(())
+    }
+
+    fn complete_unregistration(
+        &mut self,
+        combo: &str,
+        id: i32,
+        native_result: Result<(), String>,
+    ) -> Result<(), String> {
+        native_result?;
+        match self.ids.get(combo).copied() {
+            Some(current_id) if current_id == id => {
+                self.ids.remove(combo);
+                Ok(())
+            }
+            Some(current_id) => Err(format!(
+                "hotkey ID changed while unregistering {combo}: expected {id}, found {current_id}"
+            )),
+            None => Err(format!(
+                "hotkey mapping disappeared while unregistering: {combo}"
+            )),
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Public types
 // ---------------------------------------------------------------------------
@@ -42,7 +98,7 @@ impl HotkeyState {
 
 #[cfg(target_os = "windows")]
 mod platform {
-    use std::collections::HashMap;
+    use crate::hotkeys::ComboRegistry;
     use std::sync::mpsc::{self, Sender};
     use std::sync::{LazyLock, Mutex};
     use std::thread;
@@ -63,6 +119,7 @@ mod platform {
         },
         Unregister {
             id: i32,
+            result_tx: mpsc::Sender<Result<(), String>>,
         },
     }
 
@@ -72,9 +129,12 @@ mod platform {
     static THREAD_TX: LazyLock<Mutex<Option<Sender<ThreadCmd>>>> =
         LazyLock::new(|| Mutex::new(None));
 
-    /// Maps combo string → hotkey id (used during unregistration).
-    static COMBO_IDS: LazyLock<Mutex<HashMap<String, i32>>> =
-        LazyLock::new(|| Mutex::new(HashMap::new()));
+    /// Native registrations owned by this process, keyed by combo.
+    static COMBO_IDS: LazyLock<Mutex<ComboRegistry>> =
+        LazyLock::new(|| Mutex::new(ComboRegistry::default()));
+
+    /// Serializes complete register/unregister transactions.
+    static REGISTRY_OP: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
     /// Counter for assigning unique hotkey IDs.
     static NEXT_ID: LazyLock<Mutex<i32>> = LazyLock::new(|| Mutex::new(1));
@@ -252,8 +312,10 @@ mod platform {
                         let _ = result_tx
                             .send(result.map_err(|e| format!("RegisterHotKey failed: {e:?}")));
                     }
-                    Ok(ThreadCmd::Unregister { id }) => {
-                        let _ = UnregisterHotKey(Some(hwnd), id);
+                    Ok(ThreadCmd::Unregister { id, result_tx }) => {
+                        let result = UnregisterHotKey(Some(hwnd), id)
+                            .map_err(|e| format!("UnregisterHotKey failed: {e:?}"));
+                        let _ = result_tx.send(result);
                     }
                     Err(mpsc::TryRecvError::Disconnected) => break,
                     Err(mpsc::TryRecvError::Empty) => {
@@ -281,8 +343,12 @@ mod platform {
             // Actually, WM_HOTKEY gives us the id only. We need to look up the
             // combo string. We'll use a global map.
             let combo = {
-                let map = COMBO_IDS.lock().unwrap();
-                map.iter().find(|(_, &v)| v == id).map(|(k, _)| k.clone())
+                let registry = COMBO_IDS.lock().unwrap();
+                registry
+                    .ids
+                    .iter()
+                    .find(|(_, &mapped_id)| mapped_id == id)
+                    .map(|(combo, _)| combo.clone())
             };
 
             if let Some(combo) = combo {
@@ -310,8 +376,19 @@ mod platform {
     /// Register a global hotkey.
     pub fn register(combo: &str, app: AppHandle) -> Result<(), String> {
         let (modifiers, vk) = parse_combo(combo)?;
+        // Serialize the complete transaction so concurrent callers cannot
+        // register the same combo or race a rebind.
+        let _operation = REGISTRY_OP.lock().unwrap();
+        let registry = COMBO_IDS.lock().unwrap();
+        if registry.id_for(combo).is_some() {
+            let msg = format!("hotkey already registered: {combo}");
+            tracing::error!("{}", msg);
+            return Err(msg);
+        }
+        drop(registry);
 
-        // Assign a unique ID
+        // Assign a unique ID. IDs are never reused while the process lives,
+        // which makes a delayed WM_HOTKEY unable to target a new combo.
         let id = {
             let mut next = NEXT_ID.lock().unwrap();
             let id = *next;
@@ -319,67 +396,77 @@ mod platform {
             id
         };
 
-        // Send command to hotkey thread and wait for result
         let (result_tx, result_rx) = mpsc::channel();
-        let tx = THREAD_TX.lock().unwrap();
-        let tx = tx.as_ref().ok_or_else(|| {
-            tracing::error!("hotkey thread not initialised — call init() first");
-            "hotkey thread not initialised — call init() first".to_string()
-        })?;
+        {
+            let thread = THREAD_TX.lock().unwrap();
+            let tx = thread.as_ref().ok_or_else(|| {
+                tracing::error!("hotkey thread not initialised — call init() first");
+                "hotkey thread not initialised — call init() first".to_string()
+            })?;
 
-        tx.send(ThreadCmd::Register {
-            id,
-            modifiers,
-            vk,
-            result_tx,
-        })
-        .map_err(|e| {
-            let msg = format!("failed to send register command: {e}");
-            tracing::error!("{}", msg);
-            msg
-        })?;
+            tx.send(ThreadCmd::Register {
+                id,
+                modifiers,
+                vk,
+                result_tx,
+            })
+            .map_err(|e| {
+                let msg = format!("failed to send register command: {e}");
+                tracing::error!("{}", msg);
+                msg
+            })?;
+        }
 
-        result_rx.recv().map_err(|e| {
+        let native_result = result_rx.recv().map_err(|e| {
             let msg = format!("hotkey thread disconnected: {e}");
             tracing::error!("{}", msg);
             msg
-        })??;
-
-        // Store combo→id mapping for unregistration
-        COMBO_IDS.lock().unwrap().insert(combo.to_string(), id);
+        })?;
+        COMBO_IDS
+            .lock()
+            .unwrap()
+            .complete_registration(combo, id, native_result)?;
 
         crate::hotkeys::store_app_handle(app);
-
         Ok(())
     }
 
     /// Unregister a previously registered global hotkey.
     pub fn unregister(combo: &str) -> Result<(), String> {
-        let id = {
-            let map = COMBO_IDS.lock().unwrap();
-            map.get(combo).copied()
-        }
-        .ok_or_else(|| {
+        // Serialize the complete transaction. Do not hold COMBO_IDS while
+        // waiting: the Windows thread may dispatch a pending WM_HOTKEY and
+        // needs that map to resolve its combo.
+        let _operation = REGISTRY_OP.lock().unwrap();
+        let id = COMBO_IDS.lock().unwrap().id_for(combo).ok_or_else(|| {
             let msg = format!("hotkey not registered: {combo}");
             tracing::error!("{}", msg);
             msg
         })?;
 
-        let tx = THREAD_TX.lock().unwrap();
-        let tx = tx.as_ref().ok_or_else(|| {
-            tracing::error!("hotkey thread not initialised");
-            "hotkey thread not initialised".to_string()
-        })?;
+        let (result_tx, result_rx) = mpsc::channel();
+        {
+            let thread = THREAD_TX.lock().unwrap();
+            let tx = thread.as_ref().ok_or_else(|| {
+                tracing::error!("hotkey thread not initialised");
+                "hotkey thread not initialised".to_string()
+            })?;
+            tx.send(ThreadCmd::Unregister { id, result_tx })
+                .map_err(|e| {
+                    let msg = format!("failed to send unregister command: {e}");
+                    tracing::error!("{}", msg);
+                    msg
+                })?;
+        }
 
-        tx.send(ThreadCmd::Unregister { id }).map_err(|e| {
-            let msg = format!("failed to send unregister command: {e}");
+        let native_result = result_rx.recv().map_err(|e| {
+            let msg = format!("hotkey thread disconnected: {e}");
             tracing::error!("{}", msg);
             msg
         })?;
-
-        COMBO_IDS.lock().unwrap().remove(combo);
-
-        Ok(())
+        COMBO_IDS
+            .lock()
+            .unwrap()
+            .complete_unregistration(combo, id, native_result)
     }
 }
 
@@ -458,6 +545,107 @@ pub fn unregister_hotkey_platform(combo: &str) -> Result<(), String> {
 mod tests {
     use super::*;
 
+    #[cfg(any(target_os = "windows", test))]
+    #[test]
+    fn native_registry_only_tracks_acknowledged_registration() {
+        let mut registry = ComboRegistry::default();
+        assert!(registry
+            .complete_registration("Ctrl+Alt+K", 1, Err("collision".into()))
+            .is_err());
+        assert_eq!(registry.id_for("Ctrl+Alt+K"), None);
+
+        registry
+            .complete_registration("Ctrl+Alt+K", 2, Ok(()))
+            .expect("successful native registration");
+        assert_eq!(registry.id_for("Ctrl+Alt+K"), Some(2));
+    }
+
+    #[cfg(any(target_os = "windows", test))]
+    #[test]
+    fn native_registry_rejects_duplicate_combo_without_replacing_id() {
+        let mut registry = ComboRegistry::default();
+        registry
+            .complete_registration("Ctrl+Shift+1", 1, Ok(()))
+            .expect("initial registration");
+
+        assert!(registry
+            .complete_registration("Ctrl+Shift+1", 2, Ok(()))
+            .is_err());
+        assert_eq!(registry.id_for("Ctrl+Shift+1"), Some(1));
+    }
+
+    #[cfg(any(target_os = "windows", test))]
+    #[test]
+    fn generic_rebind_removes_old_mapping_after_ack() {
+        let mut registry = ComboRegistry::default();
+        registry
+            .complete_registration("Ctrl+Shift+1", 1, Ok(()))
+            .expect("initial registration");
+        registry
+            .complete_unregistration("Ctrl+Shift+1", 1, Ok(()))
+            .expect("native unregister acknowledgement");
+        assert_eq!(registry.id_for("Ctrl+Shift+1"), None);
+
+        registry
+            .complete_registration("Alt+F4", 2, Ok(()))
+            .expect("new registration");
+        assert_eq!(registry.id_for("Alt+F4"), Some(2));
+    }
+
+    #[cfg(any(target_os = "windows", test))]
+    #[test]
+    fn f11_to_f10_regression_releases_old_combo() {
+        let mut registry = ComboRegistry::default();
+        registry
+            .complete_registration("F11", 1, Ok(()))
+            .expect("initial registration");
+        registry
+            .complete_unregistration("F11", 1, Ok(()))
+            .expect("native unregister acknowledgement");
+        registry
+            .complete_registration("F10", 2, Ok(()))
+            .expect("new registration");
+
+        assert_eq!(registry.id_for("F11"), None);
+        assert_eq!(registry.id_for("F10"), Some(2));
+    }
+
+    #[cfg(any(target_os = "windows", test))]
+    #[test]
+    fn failed_unregistration_keeps_mapping_for_rollback() {
+        let mut registry = ComboRegistry::default();
+        registry
+            .complete_registration("Alt+F4", 1, Ok(()))
+            .expect("initial registration");
+
+        assert!(registry
+            .complete_unregistration("Alt+F4", 1, Err("native failure".into()))
+            .is_err());
+        assert_eq!(registry.id_for("Alt+F4"), Some(1));
+    }
+
+    #[cfg(any(target_os = "windows", test))]
+    #[test]
+    fn failed_new_registration_restores_previous_combo() {
+        let mut registry = ComboRegistry::default();
+        registry
+            .complete_registration("Ctrl+Shift+1", 1, Ok(()))
+            .expect("initial registration");
+        registry
+            .complete_unregistration("Ctrl+Shift+1", 1, Ok(()))
+            .expect("old registration removed");
+
+        assert!(registry
+            .complete_registration("Ctrl+Shift+2", 2, Err("native collision".into()))
+            .is_err());
+        registry
+            .complete_registration("Ctrl+Shift+1", 3, Ok(()))
+            .expect("old registration restored");
+
+        assert_eq!(registry.id_for("Ctrl+Shift+1"), Some(3));
+        assert_eq!(registry.id_for("Ctrl+Shift+2"), None);
+    }
+
     #[test]
     fn hotkey_event_serializes_to_json() {
         let event = HotkeyEvent {
@@ -493,12 +681,8 @@ mod tests {
 
     #[test]
     fn non_windows_register_returns_ok() {
-        // On non-Windows, register silently succeeds.
-        // We need an AppHandle, but the stub ignores it.
-        // Use a test that verifies the stub signature compiles.
-        // The stub always returns Ok(()).
-        // (We can't construct an AppHandle in a unit test, so we
-        //  verify init and the type interface instead.)
+        // On non-Windows, registration is a no-op. Native lifecycle tests
+        // above exercise the platform-independent ownership bookkeeping.
         platform::init();
     }
 }

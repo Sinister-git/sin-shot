@@ -108,6 +108,70 @@ pub fn load_settings_sync(app: &AppHandle) -> Settings {
 }
 
 // ---------------------------------------------------------------------------
+// Hotkey rebind transaction
+// ---------------------------------------------------------------------------
+
+/// Reverse native hotkey changes after a later change or settings write fails.
+/// Each native operation is acknowledged by the platform module before its
+/// combo-to-ID mapping changes, so retrying the inverse operation is safe.
+fn rollback_hotkey_changes(app: &AppHandle, changes: &[(String, String)]) {
+    for (old_combo, new_combo) in changes.iter().rev() {
+        if let Err(error) = hotkeys::unregister_hotkey_platform(new_combo) {
+            tracing::error!(
+                "Failed to unregister rolled-back hotkey '{}': {}",
+                new_combo,
+                error
+            );
+        }
+        if let Err(error) = hotkeys::register_hotkey_platform(old_combo, app.clone()) {
+            tracing::error!(
+                "Failed to restore rolled-back hotkey '{}': {}",
+                old_combo,
+                error
+            );
+        }
+    }
+}
+
+/// Apply changed hotkeys as one transaction, restoring earlier changes when a
+/// later unregister or register fails. Native unregister/register results are
+/// deliberately propagated instead of treating the channel send as success.
+fn rebind_hotkeys(app: &AppHandle, changes: &[(String, String)]) -> Result<(), String> {
+    let mut applied = Vec::new();
+
+    for (old_combo, new_combo) in changes {
+        if let Err(error) = hotkeys::unregister_hotkey_platform(old_combo) {
+            rollback_hotkey_changes(app, &applied);
+            return Err(format!(
+                "Failed to unregister hotkey '{}': {}",
+                old_combo, error
+            ));
+        }
+
+        if let Err(error) = hotkeys::register_hotkey_platform(new_combo, app.clone()) {
+            // The old native registration was acknowledged as removed, so
+            // restore it before rolling back any earlier changes.
+            if let Err(restore_error) = hotkeys::register_hotkey_platform(old_combo, app.clone()) {
+                tracing::error!(
+                    "Failed to restore hotkey '{}' after registration failure: {}",
+                    old_combo,
+                    restore_error
+                );
+            }
+            rollback_hotkey_changes(app, &applied);
+            return Err(format!(
+                "Failed to register hotkey '{}': {}",
+                new_combo, error
+            ));
+        }
+
+        applied.push((old_combo.clone(), new_combo.clone()));
+    }
+
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
 // Tauri commands
 // ---------------------------------------------------------------------------
 
@@ -131,7 +195,8 @@ pub async fn get_settings(app: AppHandle) -> Result<Settings, String> {
     }
 }
 
-/// Persist settings to disk and re-register hotkeys if they changed.
+/// Persist settings to disk, rebinding hotkeys transactionally before writing.
+/// On failure, native hotkey changes are rolled back to the previous state.
 #[tauri::command]
 pub async fn save_settings(
     app: AppHandle,
@@ -148,67 +213,37 @@ pub async fn save_settings(
         tracing::error!("{}", msg);
         msg
     })?;
-    std::fs::write(&path, raw).map_err(|e| {
-        let msg = format!("write settings file: {e}");
+
+    let changes: Vec<(String, String)> = [
+        (
+            old_settings.hotkey_full.clone(),
+            settings.hotkey_full.clone(),
+        ),
+        (
+            old_settings.hotkey_area.clone(),
+            settings.hotkey_area.clone(),
+        ),
+    ]
+    .into_iter()
+    .filter(|(old_combo, new_combo)| old_combo != new_combo)
+    .collect();
+
+    // Native ownership must be changed before persistence. If either native
+    // operation or the file write fails, leave the old settings active.
+    rebind_hotkeys(&app, &changes)?;
+    if let Err(error) = std::fs::write(&path, raw) {
+        rollback_hotkey_changes(&app, &changes);
+        let msg = format!("write settings file: {error}");
         tracing::error!("{}", msg);
-        msg
-    })?;
+        return Err(msg);
+    }
     tracing::info!("Settings saved to {}", path.display());
 
-    // If hotkey combos changed, unregister the old and register the new.
-    // On failure, re-register the old hotkey so the user isn't left without one.
-    if old_settings.hotkey_full != settings.hotkey_full {
-        let _ = hotkeys::unregister_hotkey_platform(&old_settings.hotkey_full);
-        match hotkeys::register_hotkey_platform(&settings.hotkey_full, app.clone()) {
-            Ok(()) => {
-                if let Ok(mut guard) = state.lock() {
-                    guard
-                        .hotkeys_registered
-                        .retain(|k| k != &old_settings.hotkey_full && k != &settings.hotkey_full);
-                    guard.hotkeys_registered.push(settings.hotkey_full.clone());
-                }
-            }
-            Err(e) => {
-                tracing::error!(
-                    "Failed to register hotkey '{}' after settings save: {}",
-                    settings.hotkey_full,
-                    e
-                );
-                // Re-register the old hotkey so the user still has a working combo
-                let _ = hotkeys::register_hotkey_platform(&old_settings.hotkey_full, app.clone());
-                return Err(format!(
-                    "Failed to register hotkey '{}': {}",
-                    settings.hotkey_full,
-                    e
-                ));
-            }
-        }
-    }
-
-    if old_settings.hotkey_area != settings.hotkey_area {
-        let _ = hotkeys::unregister_hotkey_platform(&old_settings.hotkey_area);
-        match hotkeys::register_hotkey_platform(&settings.hotkey_area, app.clone()) {
-            Ok(()) => {
-                if let Ok(mut guard) = state.lock() {
-                    guard
-                        .hotkeys_registered
-                        .retain(|k| k != &old_settings.hotkey_area && k != &settings.hotkey_area);
-                    guard.hotkeys_registered.push(settings.hotkey_area.clone());
-                }
-            }
-            Err(e) => {
-                tracing::error!(
-                    "Failed to register hotkey '{}' after settings save: {}",
-                    settings.hotkey_area,
-                    e
-                );
-                // Re-register the old hotkey so the user still has a working combo
-                let _ = hotkeys::register_hotkey_platform(&old_settings.hotkey_area, app.clone());
-                return Err(format!(
-                    "Failed to register hotkey '{}': {}",
-                    settings.hotkey_area,
-                    e
-                ));
+    if let Ok(mut guard) = state.lock() {
+        for (old_combo, new_combo) in &changes {
+            guard.hotkeys_registered.retain(|combo| combo != old_combo);
+            if !guard.hotkeys_registered.contains(new_combo) {
+                guard.hotkeys_registered.push(new_combo.clone());
             }
         }
     }
@@ -375,7 +410,9 @@ mod tests {
 
         assert_eq!(state.hotkeys_registered.len(), 2);
         assert!(!state.hotkeys_registered.contains(&old_combo.to_string()));
-        assert!(state.hotkeys_registered.contains(&"Ctrl+Shift+2".to_string()));
+        assert!(state
+            .hotkeys_registered
+            .contains(&"Ctrl+Shift+2".to_string()));
         assert!(state.hotkeys_registered.contains(&new_combo.to_string()));
     }
 
