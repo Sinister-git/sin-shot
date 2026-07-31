@@ -7,6 +7,8 @@
  * requiring a DOM or Tauri runtime.
  */
 
+import { moveSelection, pointInSelection } from './selection-geometry';
+
 // ---------------------------------------------------------------------------
 // Types (mirror Overlay.svelte)
 // ---------------------------------------------------------------------------
@@ -246,6 +248,46 @@ describe('selectionToDesktopCoords', () => {
     expect(result.y).toBe(75); // (50.2 + 0) * 1.5 = 75.3 -> 75
     expect(result.width).toBe(601); // 400.4 * 1.5 = 600.6 -> 601
     expect(result.height).toBe(450); // 299.8 * 1.5 = 449.7 -> 450
+  });
+});
+
+describe('movable selection geometry', () => {
+  const selection = { left: 100, top: 80, width: 300, height: 200 };
+
+  it('recognizes points inside the completed selection', () => {
+    expect(pointInSelection({ x: 100, y: 80 }, selection)).toBe(true);
+    expect(pointInSelection({ x: 250, y: 180 }, selection)).toBe(true);
+    expect(pointInSelection({ x: 401, y: 180 }, selection)).toBe(false);
+    expect(pointInSelection({ x: 250, y: 281 }, selection)).toBe(false);
+  });
+
+  it('moves a selection by the pointer delta', () => {
+    expect(moveSelection(selection, { x: 25, y: -30 }, { width: 1000, height: 800 })).toEqual({
+      left: 125,
+      top: 50,
+      width: 300,
+      height: 200,
+    });
+  });
+
+  it('clamps movement to every overlay edge', () => {
+    expect(moveSelection(selection, { x: -500, y: -500 }, { width: 1000, height: 800 })).toMatchObject({
+      left: 0,
+      top: 0,
+    });
+    expect(moveSelection(selection, { x: 1000, y: 1000 }, { width: 1000, height: 800 })).toMatchObject({
+      left: 700,
+      top: 600,
+    });
+  });
+
+  it('keeps a selection at the origin when it is larger than the overlay', () => {
+    expect(moveSelection({ left: 0, top: 0, width: 1200, height: 900 }, { x: 50, y: 50 }, { width: 1000, height: 800 })).toEqual({
+      left: 0,
+      top: 0,
+      width: 1200,
+      height: 900,
+    });
   });
 });
 

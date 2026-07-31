@@ -70,7 +70,7 @@
 <style>
   .toolbar {
     position: absolute;
-    right: -52px;
+    left: calc(100% + 8px);
     top: 0;
     bottom: 0;
     width: 48px;
@@ -79,6 +79,7 @@
     align-items: center;
     gap: 4px;
     padding: 8px 4px;
+    box-sizing: border-box;
     z-index: 10;
     pointer-events: all;
   }
