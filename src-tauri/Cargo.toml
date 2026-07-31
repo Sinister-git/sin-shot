@@ -29,6 +29,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing-appender = "0.2"
 dirs = "6"
+png = "0.17"
 
 [dev-dependencies]
 sha2 = "0.10"

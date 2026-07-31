@@ -68,6 +68,7 @@
   let uploading = $state(false);
   let uploadUrl: string | null = $state(null);
   let wasCopied = $state(false);
+  let actionError: string | null = $state(null);
 
   // Keyboard tool-switch flash state
   let flashTool: Tool | null = $state(null);
@@ -348,6 +349,7 @@
     uploading = false;
     uploadUrl = null;
     wasCopied = false;
+    actionError = null;
     currentTool = 'pen';
     currentColor = '#ff0000';
     captureGeneration++;
@@ -578,27 +580,37 @@
   // Annotation action handlers
   // ---------------------------------------------------------------------------
 
+  function describeActionError(error: unknown): string {
+    const message = error instanceof Error ? error.message : String(error);
+    return message || 'The image could not be exported. Your editor state was preserved.';
+  }
+
   async function handleCopy() {
-    const pngBase64 = await exportCurrentFrame();
-    if (!pngBase64) return;
+    actionError = null;
     try {
+      const pngBase64 = await exportCurrentFrame();
+      if (!pngBase64) throw new Error('The final image could not be composed');
       await invoke('copy_to_clipboard', { imageDataBase64: pngBase64 });
+      await finishAnnotation();
     } catch (err) {
+      actionError = `Copy failed: ${describeActionError(err)}`;
       console.error('copy_to_clipboard failed:', err);
     }
-    await finishAnnotation();
   }
 
   async function handleSave() {
-    const pngBase64 = await exportCurrentFrame();
-    if (!pngBase64) return;
+    actionError = null;
     try {
+      const pngBase64 = await exportCurrentFrame();
+      if (!pngBase64) throw new Error('The final image could not be composed');
       const savedPath = await invoke<string>('save_to_file', { imageDataBase64: pngBase64 });
       console.log('saved to', savedPath);
+      await finishAnnotation();
     } catch (err) {
+      // Keep the editor and selection alive so the user can correct/retry.
+      actionError = `Save failed: ${describeActionError(err)}`;
       console.error('save_to_file failed:', err);
     }
-    await finishAnnotation();
   }
 
   async function handleUpload() {
@@ -649,6 +661,7 @@
     uploading = false;
     uploadUrl = null;
     wasCopied = false;
+    actionError = null;
     mode = null;
     await cancelCapture();
   }
@@ -866,6 +879,13 @@
         uploading={uploading}
         layoutStyle={rectStyle(annotationLayout.actions)}
       />
+
+      {#if actionError}
+        <div class="action-error" role="alert">
+          <span>{actionError}</span>
+          <button type="button" onclick={() => (actionError = null)} aria-label="Dismiss error">✕</button>
+        </div>
+      {/if}
 
       {#if uploadUrl}
         <div class="upload-toast">
@@ -1127,6 +1147,32 @@
 
   .selection-edge.edge-left { left: -5px; }
   .selection-edge.edge-right { right: -5px; }
+
+  .action-error {
+    position: absolute;
+    top: 8px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    max-width: min(560px, calc(100vw - 32px));
+    background: rgba(120, 25, 25, 0.96);
+    border: 1px solid #ff7676;
+    border-radius: 8px;
+    padding: 10px 14px;
+    color: #fff;
+    font: 13px 'Segoe UI', system-ui, sans-serif;
+    z-index: 21;
+  }
+
+  .action-error button {
+    border: 0;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    font-size: 16px;
+  }
 
   .upload-toast {
     position: absolute;
