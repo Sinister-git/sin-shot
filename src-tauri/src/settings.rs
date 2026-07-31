@@ -21,7 +21,7 @@ pub struct Settings {
     pub save_folder: String,
     pub filename_pattern: String,
     pub image_format: String, // "png" (the only supported export format)
-    pub jpeg_quality: u8,     // 60–100
+    pub jpeg_quality: u8,     // legacy setting retained for JSON compatibility
     pub start_with_windows: bool,
     pub play_sound_on_capture: bool,
     // Hotkeys

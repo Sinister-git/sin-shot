@@ -307,7 +307,7 @@ mod tests {
         assert!(validate_png(&transparent)
             .expect_err("transparent image must fail")
             .contains("no visible pixels"));
-        let opaque_black = png_fixture(2, 2, &vec![0, 0, 0, 255].repeat(4));
+        let opaque_black = png_fixture(2, 2, &[0, 0, 0, 255].repeat(4));
         assert!(
             validate_png(&opaque_black).is_ok(),
             "black screenshots are valid"
