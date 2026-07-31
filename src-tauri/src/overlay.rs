@@ -211,6 +211,27 @@ pub async fn start_capture(app: AppHandle, mode: String) -> Result<OverlayGeomet
         tracing::error!("{}", msg);
         msg
     })?;
+    if !client_covers_bounds(
+        client_position,
+        client_size,
+        PhysicalPosition { x: min_x, y: min_y },
+        desired_client,
+    ) {
+        let msg = format!(
+            "overlay client bounds do not cover virtual desktop: client=({}, {}) {}x{}, requested=({}, {}) {}x{}",
+            client_position.x,
+            client_position.y,
+            client_size.width,
+            client_size.height,
+            min_x,
+            min_y,
+            total_width,
+            total_height,
+        );
+        tracing::error!("{}", msg);
+        return Err(msg);
+    }
+
     let scale_factor = window.scale_factor().map_err(|e| {
         let msg = format!("scale_factor after placement: {e}");
         tracing::error!("{}", msg);
@@ -347,6 +368,23 @@ fn corrected_outer_size(
     }
 }
 
+fn client_covers_bounds(
+    client_position: PhysicalPosition<i32>,
+    client_size: PhysicalSize<u32>,
+    desired_position: PhysicalPosition<i32>,
+    desired_size: PhysicalSize<u32>,
+) -> bool {
+    let client_right = i64::from(client_position.x) + i64::from(client_size.width);
+    let client_bottom = i64::from(client_position.y) + i64::from(client_size.height);
+    let desired_right = i64::from(desired_position.x) + i64::from(desired_size.width);
+    let desired_bottom = i64::from(desired_position.y) + i64::from(desired_size.height);
+
+    i64::from(client_position.x) <= i64::from(desired_position.x)
+        && i64::from(client_position.y) <= i64::from(desired_position.y)
+        && client_right >= desired_right
+        && client_bottom >= desired_bottom
+}
+
 fn corrected_outer_position(
     current_outer: PhysicalPosition<i32>,
     measured_client: PhysicalPosition<i32>,
@@ -394,6 +432,46 @@ fn get_main_window(app: &AppHandle) -> Result<WebviewWindow, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn client_bounds_cover_requested_virtual_desktop() {
+        assert!(client_covers_bounds(
+            PhysicalPosition { x: -100, y: 20 },
+            PhysicalSize {
+                width: 2200,
+                height: 1100,
+            },
+            PhysicalPosition { x: 0, y: 20 },
+            PhysicalSize {
+                width: 1920,
+                height: 1080,
+            },
+        ));
+        assert!(!client_covers_bounds(
+            PhysicalPosition { x: 0, y: 20 },
+            PhysicalSize {
+                width: 1919,
+                height: 1080,
+            },
+            PhysicalPosition { x: 0, y: 20 },
+            PhysicalSize {
+                width: 1920,
+                height: 1080,
+            },
+        ));
+        assert!(!client_covers_bounds(
+            PhysicalPosition { x: 1, y: 20 },
+            PhysicalSize {
+                width: 1920,
+                height: 1080,
+            },
+            PhysicalPosition { x: 0, y: 20 },
+            PhysicalSize {
+                width: 1920,
+                height: 1080,
+            },
+        ));
+    }
 
     #[test]
     fn monitor_info_serializes_correctly() {
