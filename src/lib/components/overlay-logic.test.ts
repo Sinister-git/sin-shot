@@ -7,7 +7,12 @@
  * requiring a DOM or Tauri runtime.
  */
 
-import { moveSelection, pointInSelection } from "./selection-geometry";
+import { annotationTransition } from "./capture-flow";
+import {
+  moveSelection,
+  pointInSelection,
+  selectionFromPointerRelease,
+} from "./selection-geometry";
 import {
   findMonitorAtClient,
   monitorToCssRect,
@@ -413,16 +418,42 @@ describe("movable selection geometry", () => {
 });
 
 describe("selection persistence after mouseup (minimum size check)", () => {
+  it("returns a completed selection on valid mouse release", () => {
+    expect(
+      selectionFromPointerRelease({ x: 500, y: 400 }, { x: 100, y: 100 }),
+    ).toEqual({ left: 100, top: 100, width: 400, height: 300 });
+  });
+
   it("rejects selections with any dimension smaller than 2 pixels", () => {
-    // This mirrors the logic: if w < 2 || h < 2, selection is null.
-    function isTooSmall(sel: SelectionRect): boolean {
-      return sel.width < 2 || sel.height < 2;
-    }
-    expect(isTooSmall({ left: 0, top: 0, width: 0, height: 0 })).toBe(true);
-    expect(isTooSmall({ left: 0, top: 0, width: 1, height: 1 })).toBe(true);
-    expect(isTooSmall({ left: 0, top: 0, width: 1, height: 3 })).toBe(true);
-    expect(isTooSmall({ left: 0, top: 0, width: 3, height: 1 })).toBe(true);
-    expect(isTooSmall({ left: 0, top: 0, width: 2, height: 2 })).toBe(false);
+    expect(selectionFromPointerRelease({ x: 0, y: 0 }, { x: 0, y: 0 })).toBeNull();
+    expect(selectionFromPointerRelease({ x: 0, y: 0 }, { x: 1, y: 1 })).toBeNull();
+    expect(selectionFromPointerRelease({ x: 0, y: 0 }, { x: 1, y: 3 })).toBeNull();
+    expect(selectionFromPointerRelease({ x: 0, y: 0 }, { x: 3, y: 1 })).toBeNull();
+    expect(selectionFromPointerRelease({ x: 0, y: 0 }, { x: 2, y: 2 })).not.toBeNull();
+  });
+});
+
+describe("capture-to-tools transition", () => {
+  const image = { data: "base64-png", width: 1920, height: 1080 };
+
+  it("shows annotation tools immediately after an area release yields an image", () => {
+    const selection = selectionFromPointerRelease({ x: 40, y: 30 }, { x: 440, y: 330 });
+    expect(selection).not.toBeNull();
+
+    // The area pointerup handler invokes capture for this selection; the
+    // resulting image uses the same transition as full-monitor capture.
+    expect(annotationTransition(image)).toEqual({
+      mode: null,
+      flowState: "annotating",
+      capturedImage: image,
+    });
+  });
+
+  it("uses the same annotation path for full-screen capture", () => {
+    const transition = annotationTransition(image);
+    expect(transition.flowState).toBe("annotating");
+    expect(transition.mode).toBeNull();
+    expect(transition.capturedImage).toBe(image);
   });
 });
 

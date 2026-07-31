@@ -15,6 +15,27 @@ export interface Bounds {
   height: number;
 }
 
+/**
+ * Normalize a pointer drag into a selection, rejecting clicks and tiny drags.
+ * This is shared by the pointer-release handler and its focused tests.
+ */
+export function selectionFromPointerRelease(
+  start: Point,
+  current: Point,
+  minimumSize = 2,
+): SelectionRect | null {
+  const selection = {
+    left: Math.min(start.x, current.x),
+    top: Math.min(start.y, current.y),
+    width: Math.abs(current.x - start.x),
+    height: Math.abs(current.y - start.y),
+  };
+
+  return selection.width < minimumSize || selection.height < minimumSize
+    ? null
+    : selection;
+}
+
 /** Return true when a pointer is inside the completed selection. */
 export function pointInSelection(
   point: Point,
