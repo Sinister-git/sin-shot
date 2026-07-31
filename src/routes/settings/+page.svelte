@@ -308,9 +308,8 @@
           <label class="field-label" for="image-format">Default Format</label>
           <select id="image-format" class="select-input" bind:value={settings.image_format}>
             <option value="png">PNG</option>
-            <option value="jpeg">JPEG</option>
-            <option value="webp">WebP</option>
           </select>
+          <p class="field-hint">PNG is currently the only supported export format.</p>
         </div>
 
         {#if settings.image_format === 'jpeg'}

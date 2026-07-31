@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { Tool, AnnotationSnapshot } from '$lib/types';
+  import { validateRgbaImage } from './image-contract';
 
   interface Props {
     /** Base64-encoded RGBA pixel data of the captured image. */
@@ -142,10 +143,16 @@
 
   function decodeRgbaImage(image: { data: string; width: number; height: number }): Promise<HTMLImageElement> {
     return new Promise((resolve, reject) => {
+      let raw: Uint8Array;
+      try {
+        raw = validateRgbaImage(image);
+      } catch (error) {
+        reject(error);
+        return;
+      }
       const img = new Image();
       img.onload = () => resolve(img);
       img.onerror = () => reject(new Error('Unable to decode captured image'));
-      const raw = Uint8Array.from(atob(image.data), (c) => c.charCodeAt(0));
       const tmpCanvas = document.createElement('canvas');
       tmpCanvas.width = image.width;
       tmpCanvas.height = image.height;
@@ -193,7 +200,13 @@
     };
     // Convert RGBA base64 to a data URL via a temporary canvas
     // Decode base64 → raw RGBA → putImageData → toDataURL
-    const raw = Uint8Array.from(atob(imageData), (c) => c.charCodeAt(0));
+    let raw: Uint8Array;
+    try {
+      raw = validateRgbaImage({ data: imageData, width: imageWidth, height: imageHeight });
+    } catch (error) {
+      console.error('Captured image validation failed:', error);
+      return;
+    }
     const tmpCanvas = document.createElement('canvas');
     tmpCanvas.width = imageWidth;
     tmpCanvas.height = imageHeight;

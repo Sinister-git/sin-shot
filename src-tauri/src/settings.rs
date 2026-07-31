@@ -20,8 +20,8 @@ pub struct Settings {
     // General
     pub save_folder: String,
     pub filename_pattern: String,
-    pub image_format: String, // "png", "jpeg", "webp"
-    pub jpeg_quality: u8,     // 60–100
+    pub image_format: String, // "png" (the only supported export format)
+    pub jpeg_quality: u8,     // legacy setting retained for JSON compatibility
     pub start_with_windows: bool,
     pub play_sound_on_capture: bool,
     // Hotkeys
@@ -91,8 +91,11 @@ fn settings_path(app: &AppHandle) -> Result<PathBuf, String> {
 pub fn load_settings_sync(app: &AppHandle) -> Settings {
     match settings_path(app) {
         Ok(path) if path.exists() => match std::fs::read_to_string(&path) {
-            Ok(raw) => match serde_json::from_str(&raw) {
-                Ok(s) => s,
+            Ok(raw) => match serde_json::from_str::<Settings>(&raw) {
+                Ok(mut settings) => {
+                    migrate_image_format(&path, &mut settings);
+                    settings
+                }
                 Err(e) => {
                     tracing::error!("Failed to parse settings file: {}", e);
                     Settings::default()
@@ -104,6 +107,28 @@ pub fn load_settings_sync(app: &AppHandle) -> Settings {
             }
         },
         _ => Settings::default(),
+    }
+}
+
+fn normalize_image_format(settings: &mut Settings) -> bool {
+    if settings.image_format == "png" {
+        return false;
+    }
+    settings.image_format = "png".into();
+    true
+}
+
+fn migrate_image_format(path: &std::path::Path, settings: &mut Settings) {
+    if !normalize_image_format(settings) {
+        return;
+    }
+    match serde_json::to_string_pretty(settings) {
+        Ok(raw) => {
+            if let Err(error) = std::fs::write(path, raw) {
+                tracing::error!("Failed to persist PNG image-format migration: {}", error);
+            }
+        }
+        Err(error) => tracing::error!("Failed to serialize PNG image-format migration: {}", error),
     }
 }
 
@@ -185,11 +210,13 @@ pub async fn get_settings(app: AppHandle) -> Result<Settings, String> {
             tracing::error!("{}", msg);
             msg
         })?;
-        serde_json::from_str(&raw).map_err(|e| {
+        let mut settings: Settings = serde_json::from_str(&raw).map_err(|e| {
             let msg = format!("parse settings: {e}");
             tracing::error!("{}", msg);
             msg
-        })
+        })?;
+        migrate_image_format(&path, &mut settings);
+        Ok(settings)
     } else {
         Ok(Settings::default())
     }
@@ -206,6 +233,7 @@ pub async fn save_settings(
     // Snapshot old settings before overwriting the file
     let old_settings = load_settings_sync(&app);
 
+    normalize_image_format(&mut settings);
     settings.jpeg_quality = settings.jpeg_quality.clamp(60, 100);
     let path = settings_path(&app)?;
     let raw = serde_json::to_string_pretty(&settings).map_err(|e| {
@@ -340,8 +368,22 @@ mod tests {
         assert!(!s.save_folder.is_empty());
         assert!(!s.filename_pattern.is_empty());
         assert!(s.jpeg_quality >= 60 && s.jpeg_quality <= 100);
-        assert!(s.image_format == "png" || s.image_format == "jpeg" || s.image_format == "webp");
+        assert_eq!(s.image_format, "png");
         assert_eq!(s.server_url, "https://screenshots.sinister.ovh/api/upload");
+    }
+
+    #[test]
+    fn legacy_image_formats_are_normalized_to_png() {
+        for legacy in ["jpeg", "webp"] {
+            let mut settings = Settings {
+                image_format: legacy.into(),
+                ..Settings::default()
+            };
+            assert!(normalize_image_format(&mut settings));
+            assert_eq!(settings.image_format, "png");
+        }
+        let mut settings = Settings::default();
+        assert!(!normalize_image_format(&mut settings));
     }
 
     #[test]
