@@ -121,7 +121,7 @@ mod platform {
     /// Desktop Duplication exposes screen pixels, not translucent content.
     /// Treat the alpha channel as opaque: on Windows it is commonly undefined
     /// or zero even when RGB contains the visible desktop.
-    fn bgra_to_rgba(bgra: &[u8]) -> Vec<u8> {
+    pub(crate) fn bgra_to_rgba(bgra: &[u8]) -> Vec<u8> {
         let mut rgba = Vec::with_capacity(bgra.len());
         for chunk in bgra.chunks_exact(4) {
             rgba.push(chunk[2]); // R ← B
@@ -592,6 +592,7 @@ mod tests {
         assert!(!state.initialized);
     }
 
+    #[cfg(not(target_os = "windows"))]
     #[test]
     fn non_windows_capture_stubs_return_error() {
         let r = platform::capture_monitor("");
