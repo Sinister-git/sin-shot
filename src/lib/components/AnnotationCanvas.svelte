@@ -12,6 +12,8 @@
     tool: Tool;
     /** Current pen/arrow/rect color. */
     color: string;
+    /** Draw only annotations over the live selected desktop frame. */
+    transparent?: boolean;
     /** Callback to notify parent when an undo/redo snapshot is taken. */
     onHistoryChange?: (canUndo: boolean, canRedo: boolean) => void;
   }
@@ -22,6 +24,7 @@
     imageHeight,
     tool,
     color,
+    transparent = false,
     onHistoryChange,
   }: Props = $props();
 
@@ -111,25 +114,69 @@
   // ------------------------------------------------------------------
   // Export annotated image as base64 PNG
   // ------------------------------------------------------------------
-  export function getAnnotatedImage(): string | null {
-    if (!canvasEl || !baseImage) return null;
-    // Create a merged canvas with base image + annotations
+  /**
+   * Export the current frame. For area selection the native image is captured
+   * only when the user commits an action, so it is supplied here at export
+   * time. This keeps annotations in the exact same pixel coordinate system as
+   * the selected frame while the editor remains over the undimmed desktop.
+   */
+  export async function getAnnotatedImage(finalImage?: {
+    data: string;
+    width: number;
+    height: number;
+  }): Promise<string | null> {
+    if (!canvasEl) return null;
+    const image = finalImage ? await decodeRgbaImage(finalImage) : baseImage;
+    if (!image && !transparent) return null;
+
     const merged = document.createElement('canvas');
-    merged.width = canvasEl.width;
-    merged.height = canvasEl.height;
+    merged.width = finalImage?.width ?? canvasEl.width;
+    merged.height = finalImage?.height ?? canvasEl.height;
     const mctx = merged.getContext('2d');
     if (!mctx) return null;
-    mctx.drawImage(baseImage, 0, 0);
-    mctx.drawImage(canvasEl, 0, 0);
+    if (image) mctx.drawImage(image, 0, 0, merged.width, merged.height);
+    mctx.drawImage(canvasEl, 0, 0, merged.width, merged.height);
     const dataUrl = merged.toDataURL('image/png');
     return dataUrl.replace(/^data:image\/png;base64,/, '');
+  }
+
+  function decodeRgbaImage(image: { data: string; width: number; height: number }): Promise<HTMLImageElement> {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error('Unable to decode captured image'));
+      const raw = Uint8Array.from(atob(image.data), (c) => c.charCodeAt(0));
+      const tmpCanvas = document.createElement('canvas');
+      tmpCanvas.width = image.width;
+      tmpCanvas.height = image.height;
+      const tmpCtx = tmpCanvas.getContext('2d');
+      if (!tmpCtx) {
+        reject(new Error('Unable to create image canvas'));
+        return;
+      }
+      const pixels = tmpCtx.createImageData(image.width, image.height);
+      pixels.data.set(raw);
+      tmpCtx.putImageData(pixels, 0, 0);
+      img.src = tmpCanvas.toDataURL('image/png');
+    });
   }
 
   // ------------------------------------------------------------------
   // Initialisation — load base image onto canvas background
   // ------------------------------------------------------------------
   $effect(() => {
-    if (!imageData || !canvasEl) return;
+    if (!canvasEl) return;
+    if (transparent) {
+      canvasEl.width = imageWidth;
+      canvasEl.height = imageHeight;
+      ctx = canvasEl.getContext('2d');
+      baseImage = null;
+      undoStack = [];
+      redoStack = [];
+      updateHistoryState();
+      return;
+    }
+    if (!imageData) return;
     const img = new Image();
     img.onload = () => {
       baseImage = img;

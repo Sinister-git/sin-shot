@@ -18,7 +18,21 @@
     selectionToDesktopCoords,
     type PhysicalMonitor,
   } from './monitor-geometry';
-  import { annotationTransition, type CapturedImage } from './capture-flow'
+  import {
+    annotationTransition,
+    areaExportFinished,
+    areaExportRequested,
+    areaSelectionCancelled,
+    areaSelectionReleased,
+    type AreaEditorPhase,
+    type CapturedImage,
+  } from './capture-flow';
+  import {
+    annotationFrameLayout,
+    fitImageFrame,
+    rectStyle,
+    type AnnotationFrameLayout,
+  } from './annotation-geometry';
 
   // ---------------------------------------------------------------------------
   // Types
@@ -87,9 +101,34 @@
   let moveStart: Point = $state({ x: 0, y: 0 });
   let moveOrigin: SelectionRect | null = $state(null);
   let selConfirmed: SelectionRect | null = $state(null);
+  // Keep one immutable frame contract through annotation and final export.
+  let selectionSnapshot: SelectionRect | null = $state(null);
+  let areaPhase: AreaEditorPhase = $state('selecting');
   let areaCapturePending = $state(false);
   let mousePos: Point = $state({ x: 0, y: 0 });
   let captureGeneration = $state(0);
+
+  let areaEditing = $derived((flowState as FlowState) === 'annotating' && mode === 'area-select' && (areaPhase as AreaEditorPhase) === 'annotating' && selectionSnapshot !== null);
+  let annotationPreview = $derived.by((): CapturedImage | null => {
+    if (!areaEditing || !selectionSnapshot) return capturedImage;
+    const physical = selectionToDesktopCoords(selectionSnapshot, virtualOrigin, overlayScaleFactor);
+    return { data: '', width: physical.width, height: physical.height };
+  });
+  let annotationLayout = $derived.by((): AnnotationFrameLayout | null => {
+    const image = annotationPreview;
+    if (!image || image.width < 1 || image.height < 1) return null;
+    const viewport = { width: window.innerWidth, height: window.innerHeight };
+    if (areaEditing && selectionSnapshot) {
+      return annotationFrameLayout(selectionSnapshot, viewport);
+    }
+    const frame = fitImageFrame(image.width, image.height, viewport);
+    const centered = {
+      ...frame,
+      left: Math.max(0, (viewport.width - frame.width) / 2),
+      top: Math.max(0, (viewport.height - frame.height) / 2),
+    };
+    return annotationFrameLayout(centered, viewport);
+  });
 
   // ---------------------------------------------------------------------------
   // Derived
@@ -237,15 +276,8 @@
       } else if (flowState === 'capturing') {
         cancelCapture();
       }
-    } else if (
-      e.key === 'Enter' &&
-      mode === 'area-select' &&
-      selectionRect &&
-      !areaCapturePending
-    ) {
-      e.preventDefault();
-      confirmAreaCapture();
     }
+
   }
 
   // ---------------------------------------------------------------------------
@@ -298,6 +330,8 @@
     selStart = { x: 0, y: 0 };
     selCurrent = { x: 0, y: 0 };
     selConfirmed = null;
+    selectionSnapshot = null;
+    areaPhase = 'selecting';
     areaCapturePending = false;
     capturedImage = null;
     uploading = false;
@@ -404,18 +438,46 @@
     const completedSelection = selectionFromPointerRelease(selStart, selCurrent);
     selConfirmed = completedSelection;
     if (completedSelection) {
-      // A valid release is the capture confirmation. Do not leave the
-      // selection overlay (or its dimming) in place while waiting for Enter.
-      await confirmAreaCapture(completedSelection);
+      // Release confirms the editable frame, not a native capture. Native
+      // capture is deferred until Save, Copy, or Upload commits the frame.
+      const editor = areaSelectionReleased(completedSelection);
+      selectionSnapshot = editor.selection;
+      areaPhase = editor.phase;
+      flowState = 'annotating';
     }
   }
 
   // ---------------------------------------------------------------------------
-  // Area-select — confirm capture → annotate
+  // Area-select — final capture/export
   // ---------------------------------------------------------------------------
 
-  async function confirmAreaCapture(selection: SelectionRect | null = selectionRect) {
-    if (!selection || areaCapturePending) return;
+  function onAnnotationPointerDown(e: PointerEvent) {
+    if (!selectionSnapshot || e.button !== 0) return;
+    movingSelection = true;
+    moveStart = { x: e.clientX, y: e.clientY };
+    moveOrigin = { ...selectionSnapshot };
+    (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+  }
+
+  function onAnnotationPointerMove(e: PointerEvent) {
+    if (!movingSelection || !moveOrigin) return;
+    selectionSnapshot = moveSelection(
+      moveOrigin,
+      { x: e.clientX - moveStart.x, y: e.clientY - moveStart.y },
+      { width: window.innerWidth, height: window.innerHeight },
+    );
+    selConfirmed = selectionSnapshot;
+  }
+
+  function onAnnotationPointerUp(e: PointerEvent) {
+    if (!movingSelection) return;
+    (e.currentTarget as HTMLElement).releasePointerCapture?.(e.pointerId);
+    movingSelection = false;
+    moveOrigin = null;
+  }
+
+  async function captureAreaForExport(selection: SelectionRect): Promise<CapturedImage | null> {
+    if (areaCapturePending) return null;
     areaCapturePending = true;
 
     const physicalSelection = selectionToDesktopCoords(
@@ -427,11 +489,10 @@
 
     if (width < 2 || height < 2) {
       areaCapturePending = false;
-      return;
+      return null;
     }
 
     const gen = captureGeneration;
-
     try {
       const result = await invoke<CapturedImage>('capture_area', {
         x: physicalSelection.x,
@@ -439,14 +500,29 @@
         width: physicalSelection.width,
         height: physicalSelection.height,
       });
-      if (captureGeneration !== gen) return;
-      transitionToAnnotation(result);
+      if (captureGeneration !== gen) return null;
+      return result;
     } catch (err) {
       console.error('capture_area failed:', err);
-      await cancelCapture();
+      return null;
     } finally {
       areaCapturePending = false;
     }
+  }
+
+  async function exportCurrentFrame(): Promise<string | null> {
+    const shouldCaptureArea = areaEditing && selectionSnapshot;
+    if (shouldCaptureArea) {
+      areaPhase = areaExportRequested({ phase: areaPhase, selection: selectionSnapshot }).phase;
+    }
+    const finalImage = shouldCaptureArea && selectionSnapshot
+      ? await captureAreaForExport(selectionSnapshot)
+      : undefined;
+    if (shouldCaptureArea) {
+      areaPhase = areaExportFinished({ phase: areaPhase, selection: selectionSnapshot }).phase;
+    }
+    if (shouldCaptureArea && !finalImage) return null;
+    return annotationCanvas?.getAnnotatedImage(finalImage ?? undefined) ?? null;
   }
 
   // ---------------------------------------------------------------------------
@@ -464,12 +540,8 @@
   // Annotation action handlers
   // ---------------------------------------------------------------------------
 
-  function exportAnnotatedImage(): string | null {
-    return annotationCanvas?.getAnnotatedImage() ?? null;
-  }
-
   async function handleCopy() {
-    const pngBase64 = exportAnnotatedImage();
+    const pngBase64 = await exportCurrentFrame();
     if (!pngBase64) return;
     try {
       await invoke('copy_to_clipboard', { imageDataBase64: pngBase64 });
@@ -480,7 +552,7 @@
   }
 
   async function handleSave() {
-    const pngBase64 = exportAnnotatedImage();
+    const pngBase64 = await exportCurrentFrame();
     if (!pngBase64) return;
     try {
       const savedPath = await invoke<string>('save_to_file', { imageDataBase64: pngBase64 });
@@ -492,7 +564,7 @@
   }
 
   async function handleUpload() {
-    const pngBase64 = exportAnnotatedImage();
+    const pngBase64 = await exportCurrentFrame();
     if (!pngBase64) return;
 
     uploading = true;
@@ -528,11 +600,14 @@
   }
 
   async function handleCancel() {
+    areaPhase = areaSelectionCancelled().phase;
     await finishAnnotation();
   }
 
   async function finishAnnotation() {
     capturedImage = null;
+    selectionSnapshot = null;
+    areaPhase = 'selecting';
     uploading = false;
     uploadUrl = null;
     wasCopied = false;
@@ -667,29 +742,67 @@
 <!-- Annotation Mode — captured image + tools                                  -->
 <!-- ========================================================================= -->
 
-{#if (flowState === 'annotating' || flowState === 'uploading') && capturedImage}
+{#if (flowState === 'annotating' || flowState === 'uploading') && annotationPreview && annotationLayout}
   <div class="annotation-overlay">
-    <!-- Dark backdrop -->
-    <div class="annotation-backdrop"></div>
-
-    <div
-      class="annotation-layout"
-      style="--image-ratio: {capturedImage.width / capturedImage.height};"
-    >
-      <div class="annotation-stage">
-        <div class="annotation-image-container">
-          {#if capturedImage}
-            <AnnotationCanvas
-              bind:this={annotationCanvas}
-              imageData={capturedImage.data}
-              imageWidth={capturedImage.width}
-              imageHeight={capturedImage.height}
-              tool={currentTool}
-              color={currentColor}
+    <!-- One backdrop is used in area mode; the selected frame is explicitly cut out. -->
+    {#if areaEditing && selectionSnapshot}
+      <svg class="annotation-selection-mask" aria-hidden="true">
+        <defs>
+          <mask id="annotation-selection-cutout" maskUnits="userSpaceOnUse" maskContentUnits="userSpaceOnUse" x="0" y="0" width="100%" height="100%">
+            <rect width="100%" height="100%" fill="white" />
+            <rect
+              x={selectionSnapshot.left}
+              y={selectionSnapshot.top}
+              width={selectionSnapshot.width}
+              height={selectionSnapshot.height}
+              fill="black"
             />
-          {/if}
+          </mask>
+        </defs>
+        <rect width="100%" height="100%" fill="rgba(0, 0, 0, 0.55)" mask="url(#annotation-selection-cutout)" />
+      </svg>
+      <!-- The frame remains movable after release; its geometry is the source
+           of truth for both the live cutout and the eventual native crop. -->
+      <div class="selection-box annotation-selection-box" style={rectStyle(selectionSnapshot)}>
+        <!-- Only the measured border handles move the frame; the image remains
+             interactive for annotation. -->
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <span class="selection-edge edge-top" onpointerdown={onAnnotationPointerDown} onpointermove={onAnnotationPointerMove} onpointerup={onAnnotationPointerUp} onpointercancel={onAnnotationPointerUp}></span>
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <span class="selection-edge edge-right" onpointerdown={onAnnotationPointerDown} onpointermove={onAnnotationPointerMove} onpointerup={onAnnotationPointerUp} onpointercancel={onAnnotationPointerUp}></span>
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <span class="selection-edge edge-bottom" onpointerdown={onAnnotationPointerDown} onpointermove={onAnnotationPointerMove} onpointerup={onAnnotationPointerUp} onpointercancel={onAnnotationPointerUp}></span>
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <span class="selection-edge edge-left" onpointerdown={onAnnotationPointerDown} onpointermove={onAnnotationPointerMove} onpointerup={onAnnotationPointerUp} onpointercancel={onAnnotationPointerUp}></span>
+      </div>
+    {:else}
+      <div class="annotation-backdrop"></div>
+    {/if}
+
+    <div class="annotation-layout">
+      <div class="annotation-frame" style={rectStyle(annotationLayout.frame)}>
+        <div class="annotation-image-container">
+          <AnnotationCanvas
+            bind:this={annotationCanvas}
+            imageData={capturedImage?.data ?? ''}
+            imageWidth={annotationPreview.width}
+            imageHeight={annotationPreview.height}
+            transparent={areaEditing}
+            tool={currentTool}
+            color={currentColor}
+          />
         </div>
-        <Toolbar bind:activeTool={currentTool} bind:color={currentColor} {flashTool} />
+        <Toolbar
+          bind:activeTool={currentTool}
+          bind:color={currentColor}
+          {flashTool}
+          layoutStyle={rectStyle({
+            left: annotationLayout.toolbar.left - annotationLayout.frame.left,
+            top: annotationLayout.toolbar.top - annotationLayout.frame.top,
+            width: annotationLayout.toolbar.width,
+            height: annotationLayout.toolbar.height,
+          })}
+        />
       </div>
 
       <ActionBar
@@ -698,9 +811,9 @@
         onUpload={handleUpload}
         onCancel={handleCancel}
         uploading={uploading}
+        layoutStyle={rectStyle(annotationLayout.actions)}
       />
 
-      <!-- Upload result toast -->
       {#if uploadUrl}
         <div class="upload-toast">
           <span class="toast-icon">📋</span>
@@ -896,21 +1009,25 @@
     pointer-events: none;
   }
 
-  .annotation-layout {
-    position: relative;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    max-width: 95vw;
-    max-height: 92vh;
-    z-index: 1;
+  .annotation-selection-mask {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 0;
   }
 
-  .annotation-stage {
-    position: relative;
-    width: min(calc(95vw - 120px), calc((92vh - 80px) * var(--image-ratio)));
-    aspect-ratio: var(--image-ratio);
-    flex: 0 1 auto;
+  .annotation-layout {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    pointer-events: none;
+  }
+
+  .annotation-frame {
+    position: absolute;
+    pointer-events: none;
   }
 
   .annotation-image-container {
@@ -918,13 +1035,49 @@
     inset: 0;
     pointer-events: all;
     overflow: hidden;
+    border: 2px solid #a78bfa;
     border-radius: 4px;
+    box-sizing: border-box;
     box-shadow: 0 0 40px rgba(0, 0, 0, 0.6);
   }
 
+  .annotation-selection-box {
+    z-index: 2;
+    pointer-events: none;
+    border-style: solid;
+  }
+
+  .selection-edge {
+    position: absolute;
+    pointer-events: all;
+    z-index: 3;
+  }
+
+  .selection-edge.edge-top,
+  .selection-edge.edge-bottom {
+    left: 0;
+    right: 0;
+    height: 10px;
+    cursor: move;
+  }
+
+  .selection-edge.edge-top { top: -5px; }
+  .selection-edge.edge-bottom { bottom: -5px; }
+
+  .selection-edge.edge-left,
+  .selection-edge.edge-right {
+    top: 0;
+    bottom: 0;
+    width: 10px;
+    cursor: move;
+  }
+
+  .selection-edge.edge-left { left: -5px; }
+  .selection-edge.edge-right { right: -5px; }
+
   .upload-toast {
     position: absolute;
-    top: -52px;
+    top: 8px;
     left: 50%;
     transform: translateX(-50%);
     display: flex;
