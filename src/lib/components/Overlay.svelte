@@ -537,6 +537,7 @@
   }
 
   async function exportCurrentFrame(): Promise<string | null> {
+    if (areaCapturePending) return null;
     const shouldCaptureArea = areaEditing && selectionSnapshot;
     if (shouldCaptureArea) {
       areaPhase = areaExportRequested({ phase: areaPhase, selection: selectionSnapshot }).phase;
