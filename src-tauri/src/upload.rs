@@ -7,6 +7,7 @@ use tauri::{AppHandle, State};
 
 const MAX_UPLOAD_BYTES: usize = 25 * 1024 * 1024;
 const MAX_RESPONSE_BYTES: usize = 64 * 1024;
+const MAX_PNG_BYTES_PER_PIXEL: usize = 8;
 const REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
 
 pub struct UploadState {
@@ -118,14 +119,29 @@ fn decode_png(input: &str) -> Result<Vec<u8>, String> {
 }
 
 fn is_png(bytes: &[u8]) -> bool {
-    // Decode the complete image, including CRCs and compressed data, instead
-    // of accepting an arbitrary file with only a PNG-looking prefix.
-    let decoder = png::Decoder::new(std::io::Cursor::new(bytes));
+    let decoder = png::Decoder::new_with_limits(
+        std::io::Cursor::new(bytes),
+        png::Limits {
+            bytes: MAX_UPLOAD_BYTES,
+        },
+    );
     let mut reader = match decoder.read_info() {
         Ok(reader) => reader,
         Err(_) => return false,
     };
-    let mut output = vec![0; reader.output_buffer_size()];
+    let (width, height) = reader.info().size();
+    let pixels = match (width as usize).checked_mul(height as usize) {
+        Some(pixels) => pixels,
+        None => return false,
+    };
+    if pixels > MAX_UPLOAD_BYTES / MAX_PNG_BYTES_PER_PIXEL {
+        return false;
+    }
+    let output_size = reader.output_buffer_size();
+    if output_size > MAX_UPLOAD_BYTES {
+        return false;
+    }
+    let mut output = vec![0; output_size];
     reader.next_frame(&mut output).is_ok()
 }
 
