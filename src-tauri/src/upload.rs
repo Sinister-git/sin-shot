@@ -357,10 +357,15 @@ mod tests {
         assert!(request
             .windows(b"name=\"image\"".len())
             .any(|window| window == b"name=\"image\""));
-        assert!(request
+        let received_start = request
             .windows(image.len())
-            .any(|window| window == image.as_slice()));
-        assert_eq!(format!("{:x}", Sha256::digest(&image)), expected_hash);
+            .position(|window| window == image.as_slice())
+            .expect("multipart request should contain the original image bytes");
+        let received_image = &request[received_start..received_start + image.len()];
+        assert_eq!(
+            format!("{:x}", Sha256::digest(received_image)),
+            expected_hash
+        );
         assert_eq!(response.key, "abc123");
         assert_eq!(response.url, "http://127.0.0.1/x/abc123");
     }

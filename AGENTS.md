@@ -10,7 +10,7 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 - **Target**: Windows only (DXGI/DirectX capture, NSIS bundle)
 - **Frontend**: `npm run dev` (Vite), `npm run build` (static SPA to `build/`)
 - **Tauri**: `npm run tauri dev`, `npm run tauri build` — uses `src-tauri/`
-- **Rust modules**: `capture.rs` (DXGI), `hotkeys.rs` (global hotkeys), `overlay.rs` (window resize/show/hide + monitor enum), `clipboard.rs`, `save.rs` (save to Pictures/Sin Shot/), `settings.rs` (user prefs persistence), `upload.rs` (→ sinister.ovh)
+- **Rust modules**: `capture.rs` (DXGI), `hotkeys.rs` (global hotkeys), `overlay.rs` (window resize/show/hide + monitor enum), `clipboard.rs`, `save.rs` (save to Pictures/Sin Shot/), `settings.rs` (user prefs persistence), `upload.rs` (bounded HTTPS multipart upload using the persisted server URL; default screenshots.sinister.ovh/api/upload)
 - **Settings persistence**: JSON file at `app_data_dir()/settings.json`, `Settings` struct with `#[serde(default)]`, loaded via `get_settings` / persisted via `save_settings` Tauri commands
 - **Settings window**: normal framed window (label `"settings"`, URL `/settings`), created on-demand in `show_settings` command, accessible from tray menu
 - **Tray**: built in `setup()` with `TrayIconBuilder`, menu items "Settings" (spawns `show_settings`) and "Quit"
