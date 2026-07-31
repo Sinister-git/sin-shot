@@ -55,13 +55,24 @@ pub async fn save_to_file(
 
     // Re-read the file and validate it as well. This catches partial writes or
     // filesystem/filter-driver transformations before reporting success.
-    let written = std::fs::read(&path).map_err(|e| {
-        let msg = format!("Saved PNG could not be read back: {e}");
-        tracing::error!("{}", msg);
-        msg
-    })?;
-    let written_image = validate_png(&written)?;
+    let written = match std::fs::read(&path) {
+        Ok(written) => written,
+        Err(error) => {
+            remove_failed_candidate(&path);
+            let msg = format!("Saved PNG could not be read back: {error}");
+            tracing::error!("{}", msg);
+            return Err(msg);
+        }
+    };
+    let written_image = match validate_png(&written) {
+        Ok(image) => image,
+        Err(error) => {
+            remove_failed_candidate(&path);
+            return Err(error);
+        }
+    };
     if written != bytes || written_image != image {
+        remove_failed_candidate(&path);
         let msg = "Saved PNG failed byte or pixel validation".to_string();
         tracing::error!("{}", msg);
         return Err(msg);
@@ -170,6 +181,16 @@ fn configured_save_dir(folder: &str) -> Result<PathBuf, String> {
         return Err("Save folder must be an absolute path; update it in Settings".to_string());
     }
     Ok(path)
+}
+
+fn remove_failed_candidate(path: &Path) {
+    if let Err(error) = std::fs::remove_file(path) {
+        tracing::error!(
+            "Failed to remove invalid PNG candidate '{}': {}",
+            path.display(),
+            error
+        );
+    }
 }
 
 fn write_new_file(dir: &Path, filename: &str, bytes: &[u8]) -> Result<PathBuf, String> {
