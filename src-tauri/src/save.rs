@@ -51,12 +51,7 @@ pub async fn save_to_file(
     })?;
 
     let filename = filename_from_pattern(&settings.filename_pattern);
-    let path = unique_path(&save_dir, &filename);
-    std::fs::write(&path, &bytes).map_err(|e| {
-        let msg = format!("Failed to write PNG to configured save folder: {e}");
-        tracing::error!("{}", msg);
-        msg
-    })?;
+    let path = write_new_file(&save_dir, &filename, &bytes)?;
 
     // Re-read the file and validate it as well. This catches partial writes or
     // filesystem/filter-driver transformations before reporting success.
@@ -177,38 +172,59 @@ fn configured_save_dir(folder: &str) -> Result<PathBuf, String> {
     Ok(path)
 }
 
-fn unique_path(dir: &Path, filename: &str) -> PathBuf {
-    let initial = dir.join(filename);
-    if !initial.exists() {
-        return initial;
-    }
+fn write_new_file(dir: &Path, filename: &str, bytes: &[u8]) -> Result<PathBuf, String> {
     let path = Path::new(filename);
     let stem = path
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("screenshot");
     let extension = path.extension().and_then(|s| s.to_str()).unwrap_or("png");
-    for suffix in 1..=u32::MAX {
-        let candidate = dir.join(format!("{stem}-{suffix}.{extension}"));
-        if !candidate.exists() {
-            return candidate;
+
+    for suffix in 0..=u32::MAX {
+        let candidate = if suffix == 0 {
+            dir.join(filename)
+        } else {
+            dir.join(format!("{stem}-{suffix}.{extension}"))
+        };
+        let mut file = match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&candidate)
+        {
+            Ok(file) => file,
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => {
+                let msg = format!("Failed to create PNG in configured save folder: {error}");
+                tracing::error!("{}", msg);
+                return Err(msg);
+            }
+        };
+
+        if let Err(error) = std::io::Write::write_all(&mut file, bytes) {
+            let _ = std::fs::remove_file(&candidate);
+            let msg = format!("Failed to write PNG to configured save folder: {error}");
+            tracing::error!("{}", msg);
+            return Err(msg);
         }
+        return Ok(candidate);
     }
-    // The loop cannot realistically exhaust, but retain a deterministic path
-    // if a hostile filesystem makes every candidate appear to exist.
-    dir.join(format!("{stem}-{}.{}", std::process::id(), extension))
+
+    let msg = "Could not reserve a unique PNG filename".to_string();
+    tracing::error!("{}", msg);
+    Err(msg)
 }
 
 fn filename_from_pattern(pattern: &str) -> String {
-    let timestamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis()
-        .to_string();
+    let now = chrono::Local::now();
+    let date = now.format("%Y-%m-%d").to_string();
+    let time = now.format("%H%M%S").to_string();
+    let random = fastrand::u64(..1 << 24);
+    let random = format!("{random:06x}");
     let raw = pattern
         .trim()
-        .replace("{date}", &timestamp)
-        .replace("{time}", &timestamp);
+        .replace("{date}", &date)
+        .replace("{time}", &time)
+        .replace("{random}", &random);
     let safe = raw
         .rsplit(['/', '\\'])
         .next()
@@ -296,5 +312,26 @@ mod tests {
         let name = filename_from_pattern("../secret\\capture");
         assert!(!name.contains('/') && !name.contains('\\'));
         assert!(name.ends_with(".png"));
+    }
+
+    #[test]
+    fn filename_pattern_expands_documented_tokens() {
+        let name = filename_from_pattern("capture_{date}_{time}_{random}");
+        let stem = name.strip_suffix(".png").expect("PNG extension");
+        let parts: Vec<_> = stem.split('_').collect();
+        assert_eq!(parts.len(), 4);
+        assert_eq!(parts[0], "capture");
+        assert_eq!(parts[1].len(), 10);
+        assert!(parts[1].bytes().enumerate().all(|(index, byte)| {
+            if matches!(index, 4 | 7) {
+                byte == b'-'
+            } else {
+                byte.is_ascii_digit()
+            }
+        }));
+        assert_eq!(parts[2].len(), 6);
+        assert!(parts[2].bytes().all(|byte| byte.is_ascii_digit()));
+        assert_eq!(parts[3].len(), 6);
+        assert!(parts[3].bytes().all(|byte| byte.is_ascii_hexdigit()));
     }
 }
