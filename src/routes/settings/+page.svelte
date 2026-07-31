@@ -42,7 +42,7 @@
     play_sound_on_capture: false,
     hotkey_full: 'Ctrl+Shift+1',
     hotkey_area: 'Ctrl+Shift+2',
-    server_url: 'https://sinister.ovh/api/upload',
+    server_url: 'https://screenshots.sinister.ovh/api/upload',
     auto_copy: true,
   });
 
@@ -411,7 +411,7 @@
             type="text"
             class="text-input mono"
             bind:value={settings.server_url}
-            placeholder="https://sinister.ovh/api/upload"
+            placeholder="https://screenshots.sinister.ovh/api/upload"
           />
         </div>
 

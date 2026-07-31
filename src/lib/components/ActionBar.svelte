@@ -31,7 +31,7 @@
     class="action-btn upload"
     onclick={onUpload}
     disabled={uploading}
-    title="Upload to sinister.ovh"
+    title="Upload screenshot"
   >
     <span class="icon">{uploading ? '⏳' : '☁️'}</span>
     <span class="label">{uploading ? 'Uploading...' : 'Upload'}</span>
