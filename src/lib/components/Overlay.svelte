@@ -108,7 +108,7 @@
   let mousePos: Point = $state({ x: 0, y: 0 });
   let captureGeneration = $state(0);
 
-  let areaEditing = $derived((flowState as FlowState) === 'annotating' && mode === 'area-select' && (areaPhase as AreaEditorPhase) === 'annotating' && selectionSnapshot !== null);
+  let areaEditing = $derived(((flowState as FlowState) === 'annotating' || (flowState as FlowState) === 'uploading') && mode === 'area-select' && ((areaPhase as AreaEditorPhase) === 'annotating' || (areaPhase as AreaEditorPhase) === 'committing') && selectionSnapshot !== null);
   let annotationPreview = $derived.by((): CapturedImage | null => {
     if (!areaEditing || !selectionSnapshot) return capturedImage;
     const physical = selectionToDesktopCoords(selectionSnapshot, virtualOrigin, overlayScaleFactor);
@@ -493,7 +493,10 @@
     }
 
     const gen = captureGeneration;
+    let overlayHidden = false;
     try {
+      await invoke('hide_capture_overlay');
+      overlayHidden = true;
       const result = await invoke<CapturedImage>('capture_area', {
         x: physicalSelection.x,
         y: physicalSelection.y,
@@ -506,6 +509,13 @@
       console.error('capture_area failed:', err);
       return null;
     } finally {
+      if (overlayHidden) {
+        try {
+          await invoke('show_capture_overlay');
+        } catch (err) {
+          console.error('show_capture_overlay failed:', err);
+        }
+      }
       areaCapturePending = false;
     }
   }
@@ -522,7 +532,7 @@
       areaPhase = areaExportFinished({ phase: areaPhase, selection: selectionSnapshot }).phase;
     }
     if (shouldCaptureArea && !finalImage) return null;
-    return annotationCanvas?.getAnnotatedImage(finalImage ?? undefined) ?? null;
+    return await (annotationCanvas?.getAnnotatedImage(finalImage ?? undefined) ?? null);
   }
 
   // ---------------------------------------------------------------------------

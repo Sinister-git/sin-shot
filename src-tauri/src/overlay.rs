@@ -157,6 +157,20 @@ pub async fn start_capture(app: AppHandle, mode: String) -> Result<OverlayGeomet
     Ok(geometry)
 }
 
+/// Hide the overlay window without changing capture state.
+#[tauri::command]
+pub async fn hide_capture_overlay(app: AppHandle) -> Result<(), String> {
+    get_main_window(&app)?.hide().map_err(|e| format!("hide: {e}"))
+}
+
+/// Show the overlay window without changing capture state.
+#[tauri::command]
+pub async fn show_capture_overlay(app: AppHandle) -> Result<(), String> {
+    let window = get_main_window(&app)?;
+    window.show().map_err(|e| format!("show: {e}"))?;
+    window.set_focus().map_err(|e| format!("set_focus: {e}"))
+}
+
 /// Hide the overlay window and reset it to its default size.
 #[tauri::command]
 pub async fn cancel_capture(app: AppHandle) -> Result<(), String> {
