@@ -326,7 +326,7 @@ describe('ActionBar component', () => {
     });
     expect(screen.getByTitle('Copy to clipboard')).toBeTruthy();
     expect(screen.getByTitle('Save to folder')).toBeTruthy();
-    expect(screen.getByTitle('Upload to sinister.ovh')).toBeTruthy();
+    expect(screen.getByTitle('Upload screenshot')).toBeTruthy();
     expect(screen.getByTitle('Discard')).toBeTruthy();
   });
 
@@ -338,7 +338,7 @@ describe('ActionBar component', () => {
       onCancel: () => {},
       uploading: true,
     });
-    const uploadBtn = screen.getByTitle('Upload to sinister.ovh');
+    const uploadBtn = screen.getByTitle('Upload screenshot');
     expect(uploadBtn.textContent).toContain('Uploading');
     expect((uploadBtn as HTMLButtonElement).disabled).toBe(true);
   });
@@ -390,7 +390,7 @@ describe('ActionBar component', () => {
       onCancel: () => {},
       uploading: true,
     });
-    const uploadBtn = screen.getByTitle('Upload to sinister.ovh') as HTMLButtonElement;
+    const uploadBtn = screen.getByTitle('Upload screenshot') as HTMLButtonElement;
     expect(uploadBtn.disabled).toBe(true);
   });
 });

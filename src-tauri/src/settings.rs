@@ -44,7 +44,7 @@ impl Default for Settings {
             play_sound_on_capture: false,
             hotkey_full: "Ctrl+Shift+1".into(),
             hotkey_area: "Ctrl+Shift+2".into(),
-            server_url: "https://sinister.ovh/api/upload".into(),
+            server_url: "https://screenshots.sinister.ovh/api/upload".into(),
             auto_copy: true,
         }
     }
@@ -341,6 +341,7 @@ mod tests {
         assert!(!s.filename_pattern.is_empty());
         assert!(s.jpeg_quality >= 60 && s.jpeg_quality <= 100);
         assert!(s.image_format == "png" || s.image_format == "jpeg" || s.image_format == "webp");
+        assert_eq!(s.server_url, "https://screenshots.sinister.ovh/api/upload");
     }
 
     #[test]

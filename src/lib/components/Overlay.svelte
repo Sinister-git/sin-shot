@@ -614,7 +614,7 @@
         imageDataBase64: pngBase64,
         filename: `sin-shot-${Date.now()}.png`,
       });
-      // Convert to short URL: https://sinister.ovh/{key} → https://sinister.ovh/x/{key}
+      // Convert the server's successful public URL to its short alias.
       const shortUrl = url.replace(/\/([^/]+)$/, '/x/$1');
       uploadUrl = shortUrl;
 
