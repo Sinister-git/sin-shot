@@ -89,6 +89,7 @@
   let selConfirmed: SelectionRect | null = $state(null);
   let areaCapturePending = $state(false);
   let mousePos: Point = $state({ x: 0, y: 0 });
+  let captureGeneration = $state(0);
 
   // ---------------------------------------------------------------------------
   // Derived
@@ -304,6 +305,7 @@
     wasCopied = false;
     currentTool = 'pen';
     currentColor = '#ff0000';
+    captureGeneration++;
   }
 
   // ---------------------------------------------------------------------------
@@ -330,8 +332,10 @@
   }
 
   async function doFullCapture(monitorName: string) {
+    const gen = captureGeneration;
     try {
       const result = await invoke<CapturedImage>('capture_full_screen', { monitorName });
+      if (captureGeneration !== gen) return;
       transitionToAnnotation(result);
     } catch (err) {
       console.error('capture_full_screen failed:', err);
@@ -426,6 +430,8 @@
       return;
     }
 
+    const gen = captureGeneration;
+
     try {
       const result = await invoke<CapturedImage>('capture_area', {
         x: physicalSelection.x,
@@ -433,6 +439,7 @@
         width: physicalSelection.width,
         height: physicalSelection.height,
       });
+      if (captureGeneration !== gen) return;
       transitionToAnnotation(result);
     } catch (err) {
       console.error('capture_area failed:', err);
