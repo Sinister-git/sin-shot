@@ -195,7 +195,8 @@ pub async fn get_settings(app: AppHandle) -> Result<Settings, String> {
     }
 }
 
-/// Persist settings to disk and re-register hotkeys if they changed.
+/// Persist settings to disk, rebinding hotkeys transactionally before writing.
+/// On failure, native hotkey changes are rolled back to the previous state.
 #[tauri::command]
 pub async fn save_settings(
     app: AppHandle,
