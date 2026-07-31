@@ -508,7 +508,13 @@
         width: physicalSelection.width,
         height: physicalSelection.height,
       });
-      if (captureGeneration !== gen) return null;
+      if (
+        captureGeneration !== gen ||
+        (flowState !== 'annotating' && flowState !== 'uploading') ||
+        mode !== 'area-select' ||
+        areaPhase !== 'committing' ||
+        !selectionSnapshot
+      ) return null;
       return result;
     } catch (err) {
       console.error('capture_area failed:', err);
