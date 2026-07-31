@@ -5,9 +5,15 @@
     activeTool: Tool;
     color: string;
     flashTool?: Tool | null;
+    layoutStyle?: string;
   }
 
-  let { activeTool = $bindable(), color = $bindable(), flashTool = null }: Props = $props();
+  let {
+    activeTool = $bindable(),
+    color = $bindable(),
+    flashTool = null,
+    layoutStyle = '',
+  }: Props = $props();
 
   const tools: { id: Tool; label: string; icon: string }[] = [
     { id: 'pen', label: 'Pen', icon: '✏' },
@@ -32,7 +38,7 @@
   }
 </script>
 
-<nav class="toolbar" aria-label="Annotation tools">
+<nav class="toolbar" style={layoutStyle} aria-label="Annotation tools">
   {#each tools as tool}
     <button
       class="tool-btn"
@@ -70,10 +76,10 @@
 <style>
   .toolbar {
     position: absolute;
-    left: calc(100% + 8px);
+    left: 0;
     top: 0;
-    bottom: 0;
-    width: 48px;
+    width: 100%;
+    height: 100%;
     display: flex;
     flex-direction: column;
     align-items: center;

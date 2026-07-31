@@ -5,12 +5,20 @@
     onUpload: () => void;
     onCancel: () => void;
     uploading: boolean;
+    layoutStyle?: string;
   }
 
-  let { onCopy, onSave, onUpload, onCancel, uploading = false }: Props = $props();
+  let {
+    onCopy,
+    onSave,
+    onUpload,
+    onCancel,
+    uploading = false,
+    layoutStyle = '',
+  }: Props = $props();
 </script>
 
-<div class="action-bar" role="toolbar" aria-label="Capture actions">
+<div class="action-bar" style={layoutStyle} role="toolbar" aria-label="Capture actions">
   <button class="action-btn copy" onclick={onCopy} title="Copy to clipboard">
     <span class="icon">📋</span>
     <span class="label">Copy</span>
@@ -36,9 +44,7 @@
 
 <style>
   .action-bar {
-    position: relative;
-    margin-top: 8px;
-    left: auto;
+    position: absolute;
     display: flex;
     gap: 8px;
     z-index: 10;

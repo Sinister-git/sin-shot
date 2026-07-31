@@ -143,6 +143,8 @@ pub fn run() {
             clipboard::copy_to_clipboard,
             clipboard::read_from_clipboard,
             overlay::start_capture,
+            overlay::hide_capture_overlay,
+            overlay::show_capture_overlay,
             overlay::cancel_capture,
             overlay::get_monitors,
             settings::get_settings,

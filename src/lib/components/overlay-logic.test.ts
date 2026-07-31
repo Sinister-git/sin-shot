@@ -7,7 +7,14 @@
  * requiring a DOM or Tauri runtime.
  */
 
-import { annotationTransition } from "./capture-flow";
+import {
+  annotationTransition,
+  areaExportFinished,
+  areaExportRequested,
+  areaSelectionCancelled,
+  areaSelectionReleased,
+} from "./capture-flow";
+import { annotationFrameLayout } from './annotation-geometry';
 import {
   moveSelection,
   pointInSelection,
@@ -461,15 +468,38 @@ describe("selection persistence after mouseup (minimum size check)", () => {
   });
 });
 
+describe('area editor lifecycle', () => {
+  const selection = { left: 40, top: 30, width: 400, height: 300 };
+
+  it('shows the selection frame after release without a capture result', () => {
+    expect(areaSelectionReleased(selection)).toEqual({ phase: 'annotating', selection });
+  });
+
+  it('captures only after an export action and preserves the frame', () => {
+    const committing = areaExportRequested(areaSelectionReleased(selection));
+    expect(committing.phase).toBe('committing');
+    expect(committing.selection).toEqual(selection);
+    expect(areaExportFinished(committing).phase).toBe('annotating');
+  });
+
+  it('cancels the frame without exporting', () => {
+    expect(areaSelectionCancelled()).toEqual({ phase: 'cancelled', selection: null });
+  });
+});
+
 describe("capture-to-tools transition", () => {
   const image = { data: "base64-png", width: 1920, height: 1080 };
 
-  it("shows annotation tools immediately after an area release yields an image", () => {
-    const selection = selectionFromPointerRelease({ x: 40, y: 30 }, { x: 440, y: 330 });
-    expect(selection).not.toBeNull();
+  it("keeps a valid release as a visible editable frame before final capture", () => {
+    const selection = selectionFromPointerRelease({ x: 440, y: 330 }, { x: 40, y: 30 });
+    expect(selection).toEqual({ left: 40, top: 30, width: 400, height: 300 });
+    const layout = annotationFrameLayout(selection!, { width: 1200, height: 800 });
+    expect(layout.frame).toEqual(selection);
+    expect(layout.actions.left).toBe(selection!.left);
+    expect(layout.toolbar.top).toBe(selection!.top);
+  });
 
-    // The area pointerup handler invokes capture for this selection; the
-    // resulting image uses the same transition as full-monitor capture.
+  it("uses the captured image transition for full-screen capture only", () => {
     expect(annotationTransition(image)).toEqual({
       mode: null,
       flowState: "annotating",
